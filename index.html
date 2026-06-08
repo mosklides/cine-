@@ -458,9 +458,18 @@ textarea{resize:vertical;min-height:80px}
    I. Arranque
    =========================================================================== */
 
-/* ----- Claves de almacenamiento ----- */
-const LS_MOVIES = 'micine_peliculas_v1';
-const LS_SET    = 'micine_ajustes_v1';
+/* ----- Supabase ----- */
+const SB_URL = 'https://msmceniiduohflqrrehh.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbWNlbmlpZHVvaGZscXJyZWhoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5NDQxNDgsImV4cCI6MjA5NjUyMDE0OH0.g52Fa5PlIJ6HaKtdojDqiISH3Fj_1fNmSNbNK4cVVGk';
+const SB_HEADERS = {
+  'Content-Type': 'application/json',
+  'apikey': SB_KEY,
+  'Authorization': 'Bearer ' + SB_KEY,
+  'Prefer': 'return=representation'
+};
+
+/* ----- Claves de localStorage (solo para ajustes) ----- */
+const LS_SET = 'micine_ajustes_v1';
 
 /* ----- Estado en memoria ----- */
 let movies = [];
@@ -473,46 +482,95 @@ let filters = { search:'', director:'', genero:'', pais:'', cine:'', sort:'fecha
 const ACCENTS = ['#00e054','#ff8000','#40bcf4','#ff5b87','#b388ff','#ffd000'];
 
 /* ===========================================================================
-   A. PERSISTENCIA
+   A. PERSISTENCIA — Supabase
    =========================================================================== */
-function loadState(){
-  try{ movies = JSON.parse(localStorage.getItem(LS_MOVIES)) || []; }catch(e){ movies = []; }
+
+/* Carga todas las películas desde Supabase al arrancar */
+async function loadState(){
   try{
     const s = JSON.parse(localStorage.getItem(LS_SET));
     if(s) settings = Object.assign(settings, s);
   }catch(e){}
-}
 
-/* Guarda y controla el límite de localStorage.
-   Si falla por cuota, intenta guardar sin imágenes en base64 (priorizamos URL). */
-function saveState(){
+  showBanner('warn', 'Cargando películas…');
   try{
-    localStorage.setItem(LS_MOVIES, JSON.stringify(movies));
-    localStorage.setItem(LS_SET, JSON.stringify(settings));
-    checkStorage();
-  }catch(err){
-    // Cuota excedida: reintentamos descartando los pósters locales en base64
-    const slim = movies.map(m => Object.assign({}, m, { poster_local:null }));
-    try{
-      localStorage.setItem(LS_MOVIES, JSON.stringify(slim));
-      movies = slim;
-      showBanner('bad','⚠️ Se ha superado el límite de almacenamiento. Se han eliminado las imágenes subidas a mano (las que tienen URL se mantienen). Haz una copia de seguridad con «Exportar».');
-    }catch(e2){
-      showBanner('bad','⚠️ No se ha podido guardar: almacenamiento lleno. Exporta y borra algunas fichas.');
-    }
+    const res = await fetch(`${SB_URL}/rest/v1/peliculas?select=*&order=fecha_visionado.desc.nullslast`, {
+      headers: SB_HEADERS
+    });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    movies = data.map(normalizeMovie);
+    const b = document.getElementById('banner');
+    if(b) b.className = 'banner';
+  }catch(e){
+    showBanner('bad', '⚠️ No se pudo conectar con Supabase: ' + e.message);
+    movies = [];
   }
+  refreshFilters();
+  renderCollection();
 }
 
-/* Estima el espacio usado y avisa al acercarse al límite (~5 MB típico) */
+/* Inserta una película nueva en Supabase */
+async function sbInsert(m){
+  const res = await fetch(`${SB_URL}/rest/v1/peliculas`, {
+    method: 'POST',
+    headers: SB_HEADERS,
+    body: JSON.stringify(movieToRow(m))
+  });
+  if(!res.ok) throw new Error(await res.text());
+}
+
+/* Actualiza una película existente en Supabase */
+async function sbUpdate(m){
+  const res = await fetch(`${SB_URL}/rest/v1/peliculas?id=eq.${encodeURIComponent(m.id)}`, {
+    method: 'PATCH',
+    headers: SB_HEADERS,
+    body: JSON.stringify(movieToRow(m))
+  });
+  if(!res.ok) throw new Error(await res.text());
+}
+
+/* Elimina una película de Supabase */
+async function sbDelete(id){
+  const res = await fetch(`${SB_URL}/rest/v1/peliculas?id=eq.${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' }
+  });
+  if(!res.ok) throw new Error(await res.text());
+}
+
+/* Convierte el modelo interno al formato de fila de Supabase */
+function movieToRow(m){
+  return {
+    id: m.id,
+    titulo: m.titulo,
+    anio: m.anio || null,
+    duracion_min: m.duracion_min || null,
+    pais: m.pais,
+    direccion: m.direccion,
+    guion: m.guion,
+    reparto: m.reparto,
+    musica: m.musica,
+    genero: m.genero,
+    sinopsis: m.sinopsis || null,
+    poster_url: m.poster_url || null,
+    filmaffinity_url: m.filmaffinity_url || null,
+    fecha_visionado: m.fecha_visionado || null,
+    cine: m.cine || null,
+    nota1: m.nota1 != null ? m.nota1 : null,
+    nota2: m.nota2 != null ? m.nota2 : null
+  };
+}
+
+/* Ajustes de UI se siguen guardando en localStorage */
+function saveState(){
+  try{ localStorage.setItem(LS_SET, JSON.stringify(settings)); }catch(e){}
+}
+
+/* Sin límite local — función vacía para compatibilidad */
 function checkStorage(){
-  const bytes = (localStorage.getItem(LS_MOVIES)||'').length + (localStorage.getItem(LS_SET)||'').length;
-  const mb = bytes / (1024*1024);
   const info = document.getElementById('storage-info');
-  if(info) info.textContent = `Espacio aproximado usado: ${mb.toFixed(2)} MB (límite habitual ≈ 5 MB).`;
-  // Avisa por encima de 4 MB
-  if(mb > 4){
-    showBanner('warn', `⚠️ Estás usando ~${mb.toFixed(1)} MB de almacenamiento local. Conviene exportar una copia de seguridad. Las imágenes subidas a mano (base64) ocupan mucho; usa URLs de póster siempre que puedas.`);
-  }
+  if(info) info.textContent = 'Los datos se almacenan en Supabase (sin límite local).';
 }
 
 /* ===========================================================================
@@ -584,7 +642,7 @@ function fmtNota(n){ return n==null?'–':(Math.round(n*10)/10).toString().repla
 /* ===========================================================================
    C. ALTA POR JSON
    =========================================================================== */
-function addFromJSON(){
+async function addFromJSON(){
   const txt = $('#json-input').value.trim();
   const msg = $('#json-msg');
   if(!txt){ msg.className='banner show bad'; msg.textContent='Pega primero un JSON.'; return; }
@@ -597,28 +655,39 @@ function addFromJSON(){
     msg.textContent='❌ JSON no válido: '+err.message;
     return;
   }
-  // Aceptamos objeto único o array
   const arr = Array.isArray(data) ? data : [data];
   if(!arr.length){ msg.className='banner show bad'; msg.textContent='El JSON no contiene fichas.'; return; }
 
-  // Validación mínima: que sean objetos
-  let creadas = 0;
-  arr.forEach(item=>{
-    if(item && typeof item==='object' && !Array.isArray(item)){
-      movies.push(normalizeMovie(item));
-      creadas++;
-    }
-  });
-
-  if(!creadas){
+  const validos = arr.filter(item=> item && typeof item==='object' && !Array.isArray(item));
+  if(!validos.length){
     msg.className='banner show bad';
     msg.textContent='❌ No se ha podido crear ninguna ficha. Revisa que cada elemento sea un objeto con al menos "titulo".';
     return;
   }
+
+  msg.className='banner show warn'; msg.textContent='Guardando en Supabase…';
+  let creadas = 0, errores = 0;
+  for(const item of validos){
+    const norm = normalizeMovie(item);
+    try{
+      await sbInsert(norm);
+      movies.push(norm);
+      creadas++;
+    }catch(e){
+      errores++;
+      console.error('Error insertando', norm.titulo, e);
+    }
+  }
+
   saveState();
   $('#json-input').value='';
-  msg.className='banner show ok';
-  msg.textContent = `✓ ${creadas} ficha(s) creada(s). Ábrelas en «Colección» para añadir fecha, cine y notas.`;
+  if(errores){
+    msg.className='banner show warn';
+    msg.textContent = `⚠️ ${creadas} creada(s), ${errores} con error. Revisa la consola.`;
+  }else{
+    msg.className='banner show ok';
+    msg.textContent = `✓ ${creadas} ficha(s) guardada(s) en Supabase. Ábrelas en «Colección» para añadir fecha, cine y notas.`;
+  }
   refreshFilters(); renderCollection();
 }
 
@@ -667,7 +736,7 @@ function openForm(id){
 }
 
 /* Lee el formulario y guarda (crea o actualiza) */
-function saveForm(id, editing){
+async function saveForm(id, editing){
   const g = sel => $('#'+sel).value;
   const data = {
     id,
@@ -680,24 +749,33 @@ function saveForm(id, editing){
     nota2: g('fm-nota2')===''?null:g('fm-nota2'),
   };
   const norm = normalizeMovie(data);
-  if(editing){
-    // Conservamos el póster local que ya tuviera
-    const prev = movies.find(x=>x.id===id);
-    if(prev) norm.poster_local = prev.poster_local;
-    const i = movies.findIndex(x=>x.id===id);
-    norm.id = id; movies[i] = norm;
-  }else{
-    movies.push(norm);
+  try{
+    if(editing){
+      norm.id = id;
+      await sbUpdate(norm);
+      const i = movies.findIndex(x=>x.id===id);
+      if(i>=0) movies[i] = norm;
+    }else{
+      await sbInsert(norm);
+      movies.push(norm);
+    }
+    saveState(); closeModal(); refreshFilters(); renderCollection();
+    showBanner('ok', editing?'✓ Ficha actualizada.':'✓ Ficha creada.', 2500);
+  }catch(e){
+    showBanner('bad', '❌ Error al guardar: '+e.message);
   }
-  saveState(); closeModal(); refreshFilters(); renderCollection();
-  showBanner('ok', editing?'✓ Ficha actualizada.':'✓ Ficha creada.', 2500);
 }
 
-function deleteMovie(id){
+async function deleteMovie(id){
   if(!confirm('¿Borrar esta película de tu colección?')) return;
-  movies = movies.filter(x=>x.id!==id);
-  saveState(); closeModal(); refreshFilters(); renderCollection();
-  showBanner('ok','Ficha eliminada.',2000);
+  try{
+    await sbDelete(id);
+    movies = movies.filter(x=>x.id!==id);
+    saveState(); closeModal(); refreshFilters(); renderCollection();
+    showBanner('ok','Ficha eliminada.',2000);
+  }catch(e){
+    showBanner('bad', '❌ Error al borrar: '+e.message);
+  }
 }
 
 /* ===========================================================================
@@ -1130,27 +1208,44 @@ function exportJSON(){
 function importJSON(ev){
   const file = ev.target.files[0]; if(!file) return;
   const reader = new FileReader();
-  reader.onload = e=>{
+  reader.onload = async e=>{
     try{
       const data = JSON.parse(e.target.result);
       const imported = Array.isArray(data) ? data : (data.movies||[]);
       if(!Array.isArray(imported)) throw new Error('Formato no reconocido.');
       if(data.settings) settings = Object.assign(settings, data.settings);
-      // Sustituimos la colección por la importada (normalizando)
-      movies = imported.map(normalizeMovie);
+      showBanner('warn', `Importando ${imported.length} película(s) a Supabase…`);
+      let ok=0, err=0;
+      for(const item of imported){
+        const norm = normalizeMovie(item);
+        try{ await sbInsert(norm); movies.push(norm); ok++; }
+        catch(e){ err++; }
+      }
       applyTheme(); saveState(); buildSettingsUI(); refreshFilters(); renderCollection();
-      showBanner('ok',`✓ Importadas ${movies.length} película(s).`,3000);
+      showBanner('ok', err
+        ? `⚠️ ${ok} importada(s), ${err} con error (puede que ya existan).`
+        : `✓ ${ok} película(s) importadas a Supabase.`, 4000);
     }catch(err){
       showBanner('bad','❌ No se pudo importar: '+err.message);
     }
   };
   reader.readAsText(file);
-  ev.target.value=''; // permite reimportar el mismo archivo
+  ev.target.value='';
 }
-function wipeAll(){
-  if(!confirm('Esto borrará TODA tu colección de este navegador. ¿Seguro? (Exporta antes una copia si quieres conservarla.)')) return;
-  movies=[]; saveState(); refreshFilters(); renderCollection();
-  showBanner('warn','Colección borrada.',2500);
+async function wipeAll(){
+  if(!confirm('Esto borrará TODA tu colección de Supabase. ¿Seguro? (Exporta antes una copia.)')) return;
+  try{
+    // Borra todas las filas de la tabla
+    const res = await fetch(`${SB_URL}/rest/v1/peliculas?id=neq.___ninguna___`, {
+      method: 'DELETE',
+      headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' }
+    });
+    if(!res.ok) throw new Error(await res.text());
+    movies=[]; saveState(); refreshFilters(); renderCollection();
+    showBanner('warn','Colección borrada de Supabase.',2500);
+  }catch(e){
+    showBanner('bad', '❌ Error al borrar: '+e.message);
+  }
 }
 
 /* ===========================================================================
@@ -1183,12 +1278,9 @@ $('#accent-custom').addEventListener('input', e=> setAccent(e.target.value));
 /* ===========================================================================
    I. ARRANQUE
    =========================================================================== */
-loadState();
 applyTheme();
 buildSettingsUI();
-refreshFilters();
-renderCollection();
-checkStorage();
+loadState(); // async: carga películas de Supabase y llama a refreshFilters + renderCollection
 
 /* ===========================================================================
    TABLA DE PAÍSES → ISO-2 (para el mapa). Acepta nombres en español e inglés.
