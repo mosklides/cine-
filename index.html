@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mi Cine · Registro de películas</title>
+
+<!--
+  ============================================================================
+  MI CINE — Registro personal de películas vistas en sala
+  ============================================================================
+  · Aplicación 100% autocontenida (HTML + CSS + JS en este mismo archivo).
+  · No usa backend, login ni APIs externas para los DATOS de las películas.
+  · Persistencia en localStorage del navegador.
+  · ÚNICA dependencia externa opcional: la librería de mapa "jsVectorMap"
+    cargada por CDN, usada SOLO para el mapa mundial de estadísticas. Si no
+    hay internet, el resto de la app funciona y el mapa se sustituye por una
+    lista de países. Las tipografías también se cargan por CDN (Google Fonts)
+    con fuentes del sistema como respaldo.
+  ============================================================================
+-->
+
+<!-- Tipografías (con fallback de sistema si no hay internet) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<!-- Librería de mapa SOLO para estadísticas (CDN, opcional) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/jsvectormap.min.css">
+
+<style>
+/* ===========================================================================
+   1. VARIABLES DE TEMA
+   Cada paleta redefine estas variables. El color de acento se sobrescribe
+   aparte desde Ajustes mediante --accent.
+   =========================================================================== */
+:root{
+  --bg:        #14181c;   /* fondo principal (estilo Letterboxd) */
+  --bg-2:      #1c252e;   /* superficies / tarjetas */
+  --bg-3:      #2c3440;   /* elementos elevados / bordes suaves */
+  --line:      #2c3440;   /* líneas y bordes */
+  --text:      #e8eaed;   /* texto principal */
+  --muted:     #99aabb;   /* texto secundario */
+  --accent:    #00e054;   /* color de acento (configurable) */
+  --accent-ink:#0b1410;   /* texto sobre acento */
+  --good:      #40d97a;
+  --warn:      #ffae42;
+  --bad:       #ff5b5b;
+  --radius:    14px;
+  --shadow:    0 8px 30px rgba(0,0,0,.45);
+  --font-disp: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* --- Paletas alternativas (se activan con data-palette en <html>) --- */
+html[data-palette="carbon"]{
+  --bg:#0d0d0f; --bg-2:#17171b; --bg-3:#26262d; --line:#26262d;
+  --text:#ececef; --muted:#9a9aa6;
+}
+html[data-palette="medianoche"]{
+  --bg:#0b1020; --bg-2:#141b30; --bg-3:#23304f; --line:#23304f;
+  --text:#e6ebf5; --muted:#92a1c4;
+}
+
+/* ===========================================================================
+   2. BASE
+   =========================================================================== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font-body);
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  /* textura sutil para dar profundidad al fondo */
+  background-image:radial-gradient(1200px 600px at 80% -10%, color-mix(in srgb,var(--accent) 8%, transparent), transparent 70%);
+  min-height:100vh;
+}
+a{color:var(--accent);text-decoration:none}
+button{font-family:inherit}
+h1,h2,h3{font-family:var(--font-disp);font-weight:700;line-height:1.1;margin:0}
+::selection{background:var(--accent);color:var(--accent-ink)}
+
+/* ===========================================================================
+   3. CABECERA Y NAVEGACIÓN
+   =========================================================================== */
+header.topbar{
+  position:sticky;top:0;z-index:50;
+  background:color-mix(in srgb,var(--bg) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.topbar-inner{
+  max-width:1180px;margin:0 auto;padding:14px 20px;
+  display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+}
+.brand{display:flex;align-items:baseline;gap:10px}
+.brand .logo{
+  font-family:var(--font-disp);font-weight:800;font-size:24px;letter-spacing:-.5px;
+}
+.brand .dot{color:var(--accent)}
+.brand .sub{color:var(--muted);font-size:13px}
+nav.tabs{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav.tabs button{
+  background:transparent;border:0;color:var(--muted);
+  padding:9px 14px;border-radius:999px;cursor:pointer;font-size:14px;font-weight:600;
+  transition:.15s;
+}
+nav.tabs button:hover{color:var(--text);background:var(--bg-2)}
+nav.tabs button.active{color:var(--accent-ink);background:var(--accent)}
+
+/* ===========================================================================
+   4. LAYOUT GENERAL
+   =========================================================================== */
+main{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
+.view{display:none;animation:fade .3s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.section-title{font-size:22px;margin-bottom:4px}
+.section-sub{color:var(--muted);font-size:14px;margin-bottom:18px}
+
+/* Banner de aviso (almacenamiento, errores, etc.) */
+.banner{
+  display:none;margin-bottom:18px;padding:12px 16px;border-radius:10px;
+  font-size:14px;border:1px solid;
+}
+.banner.show{display:block}
+.banner.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:var(--warn);color:var(--warn)}
+.banner.bad{background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad);color:var(--bad)}
+.banner.ok{background:color-mix(in srgb,var(--good) 12%,transparent);border-color:var(--good);color:var(--good)}
+
+/* ===========================================================================
+   5. CONTROLES (barra de búsqueda / filtros)
+   =========================================================================== */
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:22px}
+.input, select, textarea{
+  background:var(--bg-2);color:var(--text);border:1px solid var(--line);
+  border-radius:10px;padding:10px 12px;font-size:14px;font-family:inherit;outline:none;transition:.15s;
+}
+.input:focus, select:focus, textarea:focus{border-color:var(--accent)}
+.input.search{flex:1;min-width:200px}
+.chips-active{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+.chip-filter{
+  display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--accent-ink);
+  padding:5px 10px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;border:0;
+}
+.chip-filter .x{font-weight:800;opacity:.7}
+
+/* ===========================================================================
+   6. REJILLA DE PÓSTERS (estética Letterboxd)
+   =========================================================================== */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:18px;
+}
+.card{
+  cursor:pointer;position:relative;border-radius:10px;overflow:hidden;
+  background:var(--bg-2);border:1px solid var(--line);
+  transition:transform .18s ease, box-shadow .18s ease, border-color .18s;
+}
+.card:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:var(--accent)}
+.poster-wrap{aspect-ratio:2/3;position:relative;background:var(--bg-3)}
+.poster-wrap img{width:100%;height:100%;object-fit:cover;display:block}
+.poster-fallback{
+  position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:12px;gap:8px;color:var(--muted);
+  font-size:13px;background:linear-gradient(160deg,var(--bg-3),var(--bg-2));
+}
+.poster-fallback .ttl{font-family:var(--font-disp);font-weight:700;color:var(--text);font-size:15px}
+.card-meta{padding:9px 10px}
+.card-title{font-size:13.5px;font-weight:600;line-height:1.25;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-year{color:var(--muted);font-size:12px;margin-top:2px}
+/* insignias de nota sobre el póster */
+.card-scores{position:absolute;top:8px;left:8px;display:flex;gap:5px}
+.score-badge{
+  font-size:11px;font-weight:700;padding:3px 7px;border-radius:999px;
+  background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(4px);
+  border:1px solid var(--line);color:var(--text);
+}
+.score-badge.avg{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.empty-state{text-align:center;color:var(--muted);padding:60px 20px;font-size:15px}
+
+/* ===========================================================================
+   7. BOTONES
+   =========================================================================== */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;justify-content:center;
+  background:var(--bg-3);color:var(--text);border:1px solid var(--line);
+  padding:10px 16px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:.15s;
+}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,transparent)}
+.btn.danger:hover{background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.btn.sm{padding:7px 12px;font-size:13px}
+
+/* ===========================================================================
+   8. FORMULARIO Y FICHA (modal)
+   =========================================================================== */
+.modal{position:fixed;inset:0;z-index:100;display:none;align-items:flex-start;justify-content:center;
+  background:rgba(0,0,0,.6);backdrop-filter:blur(3px);overflow-y:auto;padding:40px 16px}
+.modal.show{display:flex}
+.modal-box{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);
+  width:100%;max-width:780px;box-shadow:var(--shadow);animation:pop .25s ease}
+@keyframes pop{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+.modal-head{display:flex;align-items:center;justify-content:space-between;
+  padding:18px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg-2);border-radius:var(--radius) var(--radius) 0 0}
+.modal-head h2{font-size:19px}
+.modal-body{padding:22px}
+.close-x{background:transparent;border:0;color:var(--muted);font-size:24px;cursor:pointer;line-height:1}
+.close-x:hover{color:var(--text)}
+
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.field{display:flex;flex-direction:column;gap:5px}
+.field.col-2{grid-column:1 / -1}
+.field label{font-size:12.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.field .hint{font-size:11.5px;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0}
+.field input, .field textarea, .field select{width:100%}
+textarea{resize:vertical;min-height:80px}
+.form-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap}
+
+/* Ficha detallada */
+.detail{display:grid;grid-template-columns:230px 1fr;gap:24px}
+.detail .poster-col{position:relative}
+.detail .poster-col .poster-wrap{border-radius:10px;overflow:hidden;border:1px solid var(--line)}
+.detail h2.dtitle{font-size:26px;line-height:1.05}
+.detail .dyear{color:var(--muted);font-weight:500}
+.detail .meta-row{margin:14px 0;font-size:14px}
+.detail .meta-row .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:4px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:var(--bg-3);border:1px solid var(--line);color:var(--text);
+  padding:4px 10px;border-radius:999px;font-size:13px;cursor:default}
+.chip.click{cursor:pointer;transition:.15s}
+.chip.click:hover{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.scores-detail{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 4px}
+.score-card{background:var(--bg-3);border:1px solid var(--line);border-radius:12px;padding:12px 16px;text-align:center;min-width:96px}
+.score-card .who{font-size:12px;color:var(--muted)}
+.score-card .val{font-family:var(--font-disp);font-size:28px;font-weight:800}
+.score-card.avg{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.score-card.avg .who{color:var(--accent-ink);opacity:.8}
+.sinopsis{color:var(--muted);font-size:14.5px;line-height:1.6}
+
+/* ===========================================================================
+   9. ESTADÍSTICAS
+   =========================================================================== */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
+.stat-card{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+.stat-card h3{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.stat-card.wide{grid-column:1 / -1}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px}
+.kpi{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+.kpi .num{font-family:var(--font-disp);font-size:30px;font-weight:800;color:var(--accent)}
+.kpi .lab{color:var(--muted);font-size:13px;margin-top:2px}
+
+/* Barras horizontales (gráficos sin librería) */
+.bars{display:flex;flex-direction:column;gap:9px}
+.bar-row{display:grid;grid-template-columns:120px 1fr 44px;align-items:center;gap:10px;font-size:13px}
+.bar-row .blab{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{background:var(--bg-3);border-radius:6px;height:16px;overflow:hidden}
+.bar-fill{height:100%;background:var(--accent);border-radius:6px;transition:width .6s ease}
+.bar-row .bval{text-align:right;font-variant-numeric:tabular-nums;color:var(--text)}
+
+/* Histograma de notas (columnas verticales) */
+.hist{display:flex;align-items:flex-end;gap:6px;height:140px;margin-top:6px}
+.hist .hcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%}
+.hist .hbar{width:100%;background:var(--accent);border-radius:5px 5px 0 0;min-height:2px;transition:height .6s ease}
+.hist .hlab{font-size:11px;color:var(--muted)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-bottom:10px}
+.legend .li{display:flex;align-items:center;gap:6px}
+.legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+
+#mapa{height:420px;width:100%}
+.map-fallback{color:var(--muted);font-size:14px}
+
+/* ===========================================================================
+   10. AJUSTES
+   =========================================================================== */
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.swatch{width:34px;height:34px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:.15s}
+.swatch:hover{transform:scale(1.1)}
+.swatch.active{border-color:var(--text)}
+.palette-opts{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.palette-opt{padding:10px 14px;border-radius:10px;border:1px solid var(--line);cursor:pointer;background:var(--bg-3);font-size:13px;font-weight:600}
+.palette-opt.active{border-color:var(--accent);color:var(--accent)}
+.muted-note{color:var(--muted);font-size:13px;margin-top:6px}
+
+/* ===========================================================================
+   11. RESPONSIVE
+   =========================================================================== */
+@media(max-width:680px){
+  .detail{grid-template-columns:1fr}
+  .detail .poster-col{max-width:220px;margin:0 auto}
+  .form-grid{grid-template-columns:1fr}
+  .bar-row{grid-template-columns:90px 1fr 40px}
+}
+</style>
+</head>
+<body>
+
+<!-- ====================== CABECERA ====================== -->
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="logo">Mi&nbsp;Cine<span class="dot">.</span></span>
+      <span class="sub">tu diario de sala</span>
+    </div>
+    <nav class="tabs">
+      <button data-tab="coleccion" class="active">Colección</button>
+      <button data-tab="stats">Estadísticas</button>
+      <button data-tab="anadir">Añadir</button>
+      <button data-tab="ajustes">Ajustes</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <!-- Banner global de avisos -->
+  <div id="banner" class="banner"></div>
+
+  <!-- ============ VISTA: COLECCIÓN ============ -->
+  <section id="coleccion" class="view active">
+    <div class="controls">
+      <input id="search" class="input search" type="text" placeholder="🔎  Buscar por título…">
+      <select id="f-director"><option value="">Director/a (todos)</option></select>
+      <select id="f-genero"><option value="">Género (todos)</option></select>
+      <select id="f-pais"><option value="">País (todos)</option></select>
+      <select id="f-cine"><option value="">Cine (todos)</option></select>
+      <select id="f-sort">
+        <option value="fecha_desc">Más recientes (visionado)</option>
+        <option value="fecha_asc">Más antiguas (visionado)</option>
+        <option value="nota_desc">Nota media ↓</option>
+        <option value="nota_asc">Nota media ↑</option>
+        <option value="anio_desc">Año ↓</option>
+        <option value="anio_asc">Año ↑</option>
+        <option value="titulo_asc">Título A–Z</option>
+      </select>
+    </div>
+    <div id="active-filters" class="chips-active"></div>
+    <div id="grid" class="grid"></div>
+  </section>
+
+  <!-- ============ VISTA: ESTADÍSTICAS ============ -->
+  <section id="stats" class="view">
+    <h2 class="section-title">Estadísticas</h2>
+    <p class="section-sub">Calculadas a partir de tu colección.</p>
+    <div id="stats-content"></div>
+  </section>
+
+  <!-- ============ VISTA: AÑADIR ============ -->
+  <section id="anadir" class="view">
+    <h2 class="section-title">Añadir películas</h2>
+    <p class="section-sub">Pega un bloque JSON (un objeto o varios) o usa el formulario manual.</p>
+
+    <div class="stat-card" style="margin-bottom:18px">
+      <h3>① Añadir desde JSON</h3>
+      <p class="muted-note" style="margin-top:0;margin-bottom:10px">
+        Acepta un objeto <code>{…}</code> o un array <code>[{…},{…}]</code> con el esquema indicado.
+        Los datos de visionado (fecha, cine y notas) los rellenas después en cada ficha.
+      </p>
+      <textarea id="json-input" placeholder='{"titulo":"…","anio":2024,"duracion_min":120,"pais":["España"],"direccion":["…"],"guion":[],"reparto":[],"musica":[],"genero":["Drama"],"sinopsis":"…","poster_url":"https://image.tmdb.org/…","filmaffinity_url":"https://www.filmaffinity.com/…"}'></textarea>
+      <div class="form-actions" style="justify-content:flex-start">
+        <button class="btn primary" onclick="addFromJSON()">Crear fichas</button>
+        <button class="btn ghost" onclick="document.getElementById('json-input').value=''">Limpiar</button>
+      </div>
+      <div id="json-msg" class="banner" style="margin-top:6px"></div>
+    </div>
+
+    <div class="stat-card">
+      <h3>② Formulario manual</h3>
+      <p class="muted-note" style="margin-top:0">Crea una ficha rellenando los campos a mano.</p>
+      <button class="btn primary" style="margin-top:10px" onclick="openForm()">Nueva ficha en blanco</button>
+    </div>
+  </section>
+
+  <!-- ============ VISTA: AJUSTES ============ -->
+  <section id="ajustes" class="view">
+    <h2 class="section-title">Ajustes</h2>
+    <p class="section-sub">Personas que puntúan, apariencia y copias de seguridad.</p>
+
+    <div class="settings-grid">
+      <!-- Personas -->
+      <div class="stat-card">
+        <h3>Personas que puntúan</h3>
+        <div class="field" style="margin-bottom:12px">
+          <label>Persona 1</label>
+          <input id="set-p1" class="input" type="text">
+        </div>
+        <div class="field">
+          <label>Persona 2</label>
+          <input id="set-p2" class="input" type="text">
+        </div>
+        <button class="btn primary sm" style="margin-top:14px" onclick="saveNames()">Guardar nombres</button>
+      </div>
+
+      <!-- Apariencia -->
+      <div class="stat-card">
+        <h3>Apariencia</h3>
+        <label class="field" style="margin-bottom:4px"><span style="color:var(--muted);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Color de acento</span></label>
+        <div id="swatches" class="swatches"></div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
+          <input id="accent-custom" type="color" value="#00e054" style="width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--bg-3);cursor:pointer">
+          <span class="muted-note" style="margin:0">…o elige uno a medida</span>
+        </div>
+        <label class="field" style="margin-top:16px"><span style="color:var(--muted);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Paleta de fondo</span></label>
+        <div id="palettes" class="palette-opts"></div>
+      </div>
+
+      <!-- Copia de seguridad -->
+      <div class="stat-card">
+        <h3>Copia de seguridad</h3>
+        <p class="muted-note" style="margin-top:0">Exporta toda tu colección a un archivo JSON o vuelve a importarla.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+          <button class="btn primary sm" onclick="exportJSON()">⬇ Exportar colección</button>
+          <button class="btn sm" onclick="document.getElementById('import-file').click()">⬆ Importar colección</button>
+          <input id="import-file" type="file" accept="application/json,.json" style="display:none" onchange="importJSON(event)">
+        </div>
+        <div id="storage-info" class="muted-note"></div>
+        <button class="btn danger sm" style="margin-top:14px" onclick="wipeAll()">Borrar toda la colección</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ====================== MODAL (ficha / formulario) ====================== -->
+<div id="modal" class="modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="modal-title">Ficha</h2>
+      <button class="close-x" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<!-- Librería de mapa SOLO para estadísticas (CDN, opcional) -->
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/jsvectormap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
+
+<script>
+/* ===========================================================================
+   APP — LÓGICA
+   ===========================================================================
+   Organización:
+   A. Estado y persistencia (localStorage)
+   B. Utilidades
+   C. Alta por JSON y formulario
+   D. Colección: render, filtros, búsqueda, orden
+   E. Ficha detallada
+   F. Estadísticas (incl. mapa)
+   G. Ajustes y temas
+   H. Exportar / importar
+   I. Arranque
+   =========================================================================== */
+
+/* ----- Claves de almacenamiento ----- */
+const LS_MOVIES = 'micine_peliculas_v1';
+const LS_SET    = 'micine_ajustes_v1';
+
+/* ----- Estado en memoria ----- */
+let movies = [];
+let settings = { p1:'Persona 1', p2:'Persona 2', accent:'#00e054', palette:'letterboxd' };
+
+/* Filtros activos de la colección */
+let filters = { search:'', director:'', genero:'', pais:'', cine:'', sort:'fecha_desc' };
+
+/* Paletas de acento sugeridas (la primera es la de por defecto) */
+const ACCENTS = ['#00e054','#ff8000','#40bcf4','#ff5b87','#b388ff','#ffd000'];
+
+/* ===========================================================================
+   A. PERSISTENCIA
+   =========================================================================== */
+function loadState(){
+  try{ movies = JSON.parse(localStorage.getItem(LS_MOVIES)) || []; }catch(e){ movies = []; }
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_SET));
+    if(s) settings = Object.assign(settings, s);
+  }catch(e){}
+}
+
+/* Guarda y controla el límite de localStorage.
+   Si falla por cuota, intenta guardar sin imágenes en base64 (priorizamos URL). */
+function saveState(){
+  try{
+    localStorage.setItem(LS_MOVIES, JSON.stringify(movies));
+    localStorage.setItem(LS_SET, JSON.stringify(settings));
+    checkStorage();
+  }catch(err){
+    // Cuota excedida: reintentamos descartando los pósters locales en base64
+    const slim = movies.map(m => Object.assign({}, m, { poster_local:null }));
+    try{
+      localStorage.setItem(LS_MOVIES, JSON.stringify(slim));
+      movies = slim;
+      showBanner('bad','⚠️ Se ha superado el límite de almacenamiento. Se han eliminado las imágenes subidas a mano (las que tienen URL se mantienen). Haz una copia de seguridad con «Exportar».');
+    }catch(e2){
+      showBanner('bad','⚠️ No se ha podido guardar: almacenamiento lleno. Exporta y borra algunas fichas.');
+    }
+  }
+}
+
+/* Estima el espacio usado y avisa al acercarse al límite (~5 MB típico) */
+function checkStorage(){
+  const bytes = (localStorage.getItem(LS_MOVIES)||'').length + (localStorage.getItem(LS_SET)||'').length;
+  const mb = bytes / (1024*1024);
+  const info = document.getElementById('storage-info');
+  if(info) info.textContent = `Espacio aproximado usado: ${mb.toFixed(2)} MB (límite habitual ≈ 5 MB).`;
+  // Avisa por encima de 4 MB
+  if(mb > 4){
+    showBanner('warn', `⚠️ Estás usando ~${mb.toFixed(1)} MB de almacenamiento local. Conviene exportar una copia de seguridad. Las imágenes subidas a mano (base64) ocupan mucho; usa URLs de póster siempre que puedas.`);
+  }
+}
+
+/* ===========================================================================
+   B. UTILIDADES
+   =========================================================================== */
+const $  = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+/* Normaliza cualquier valor a array de strings (acepta array o "a, b, c") */
+function toArr(v){
+  if(Array.isArray(v)) return v.map(x=>String(x).trim()).filter(Boolean);
+  if(typeof v === 'string') return v.split(',').map(x=>x.trim()).filter(Boolean);
+  return [];
+}
+/* Escapa HTML para evitar romper la maquetación con datos del usuario */
+function esc(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+/* Quita acentos y pasa a minúsculas (para búsquedas y para casar países) */
+function fold(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+}
+/* ID único sencillo */
+function uid(){ return 'm_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7); }
+
+function showBanner(type,msg,timeout){
+  const b = $('#banner');
+  b.className = 'banner show '+type;
+  b.textContent = msg;
+  if(timeout){ setTimeout(()=>{ b.className='banner'; }, timeout); }
+}
+
+/* Convierte una ficha (de JSON o formulario) al modelo interno completo */
+function normalizeMovie(raw){
+  return {
+    id: raw.id || uid(),
+    titulo: String(raw.titulo||'').trim() || 'Sin título',
+    anio: Number(raw.anio)||0,
+    duracion_min: Number(raw.duracion_min)||0,
+    pais: toArr(raw.pais),
+    direccion: toArr(raw.direccion),
+    guion: toArr(raw.guion),
+    reparto: toArr(raw.reparto),
+    musica: toArr(raw.musica),
+    genero: toArr(raw.genero),
+    sinopsis: String(raw.sinopsis||''),
+    poster_url: String(raw.poster_url||'').trim(),
+    filmaffinity_url: String(raw.filmaffinity_url||'').trim(),
+    // Datos de visionado (no vienen en el JSON de la película)
+    fecha_visionado: raw.fecha_visionado || '',
+    cine: raw.cine || '',
+    nota1: (raw.nota1===0||raw.nota1)?Number(raw.nota1):null,
+    nota2: (raw.nota2===0||raw.nota2)?Number(raw.nota2):null,
+    // Póster subido a mano (base64). Sólo se usa si falla / falta la URL.
+    poster_local: raw.poster_local || null
+  };
+}
+
+/* Nota media de una película (o null si no hay ninguna) */
+function media(m){
+  const ns = [m.nota1,m.nota2].filter(n=>n!=null && !isNaN(n));
+  if(!ns.length) return null;
+  return ns.reduce((a,b)=>a+b,0)/ns.length;
+}
+function fmtNota(n){ return n==null?'–':(Math.round(n*10)/10).toString().replace('.0',''); }
+
+/* ===========================================================================
+   C. ALTA POR JSON
+   =========================================================================== */
+function addFromJSON(){
+  const txt = $('#json-input').value.trim();
+  const msg = $('#json-msg');
+  if(!txt){ msg.className='banner show bad'; msg.textContent='Pega primero un JSON.'; return; }
+
+  let data;
+  try{
+    data = JSON.parse(txt);
+  }catch(err){
+    msg.className='banner show bad';
+    msg.textContent='❌ JSON no válido: '+err.message;
+    return;
+  }
+  // Aceptamos objeto único o array
+  const arr = Array.isArray(data) ? data : [data];
+  if(!arr.length){ msg.className='banner show bad'; msg.textContent='El JSON no contiene fichas.'; return; }
+
+  // Validación mínima: que sean objetos
+  let creadas = 0;
+  arr.forEach(item=>{
+    if(item && typeof item==='object' && !Array.isArray(item)){
+      movies.push(normalizeMovie(item));
+      creadas++;
+    }
+  });
+
+  if(!creadas){
+    msg.className='banner show bad';
+    msg.textContent='❌ No se ha podido crear ninguna ficha. Revisa que cada elemento sea un objeto con al menos "titulo".';
+    return;
+  }
+  saveState();
+  $('#json-input').value='';
+  msg.className='banner show ok';
+  msg.textContent = `✓ ${creadas} ficha(s) creada(s). Ábrelas en «Colección» para añadir fecha, cine y notas.`;
+  refreshFilters(); renderCollection();
+}
+
+/* ===========================================================================
+   FORMULARIO MANUAL (alta / edición)
+   =========================================================================== */
+function openForm(id){
+  const m = id ? movies.find(x=>x.id===id) : normalizeMovie({});
+  const editing = !!id;
+  $('#modal-title').textContent = editing ? 'Editar ficha' : 'Nueva ficha';
+
+  // Construye el formulario. Los campos de array se editan como texto separado por comas.
+  $('#modal-body').innerHTML = `
+    <div class="form-grid">
+      <div class="field col-2">
+        <label>Título</label>
+        <input class="input" id="fm-titulo" value="${esc(m.titulo==='Sin título'&&!editing?'':m.titulo)}">
+      </div>
+      <div class="field"><label>Año</label><input class="input" id="fm-anio" type="number" value="${m.anio||''}"></div>
+      <div class="field"><label>Duración (min)</label><input class="input" id="fm-duracion" type="number" value="${m.duracion_min||''}"></div>
+      <div class="field"><label>País <span class="hint">(separa con comas)</span></label><input class="input" id="fm-pais" value="${esc(m.pais.join(', '))}"></div>
+      <div class="field"><label>Género <span class="hint">(comas)</span></label><input class="input" id="fm-genero" value="${esc(m.genero.join(', '))}"></div>
+      <div class="field"><label>Dirección <span class="hint">(comas)</span></label><input class="input" id="fm-direccion" value="${esc(m.direccion.join(', '))}"></div>
+      <div class="field"><label>Guion <span class="hint">(comas)</span></label><input class="input" id="fm-guion" value="${esc(m.guion.join(', '))}"></div>
+      <div class="field col-2"><label>Reparto <span class="hint">(comas)</span></label><input class="input" id="fm-reparto" value="${esc(m.reparto.join(', '))}"></div>
+      <div class="field col-2"><label>Música <span class="hint">(comas)</span></label><input class="input" id="fm-musica" value="${esc(m.musica.join(', '))}"></div>
+      <div class="field col-2"><label>Sinopsis</label><textarea id="fm-sinopsis">${esc(m.sinopsis)}</textarea></div>
+      <div class="field col-2"><label>URL del póster <span class="hint">(image.tmdb.org…)</span></label><input class="input" id="fm-poster" value="${esc(m.poster_url)}"></div>
+      <div class="field col-2"><label>URL de FilmAffinity</label><input class="input" id="fm-fa" value="${esc(m.filmaffinity_url)}"></div>
+
+      <div class="field col-2" style="border-top:1px solid var(--line);padding-top:14px;margin-top:4px">
+        <label style="color:var(--accent)">Datos del visionado</label>
+      </div>
+      <div class="field"><label>Fecha en que la vi</label><input class="input" id="fm-fecha" type="date" value="${esc(m.fecha_visionado)}"></div>
+      <div class="field"><label>Cine</label><input class="input" id="fm-cine" value="${esc(m.cine)}"></div>
+      <div class="field"><label>Nota · ${esc(settings.p1)} <span class="hint">(0–10)</span></label><input class="input" id="fm-nota1" type="number" min="0" max="10" step="0.5" value="${m.nota1==null?'':m.nota1}"></div>
+      <div class="field"><label>Nota · ${esc(settings.p2)} <span class="hint">(0–10)</span></label><input class="input" id="fm-nota2" type="number" min="0" max="10" step="0.5" value="${m.nota2==null?'':m.nota2}"></div>
+    </div>
+    <div class="form-actions">
+      ${editing?`<button class="btn danger" onclick="deleteMovie('${m.id}')">Borrar</button>`:''}
+      <button class="btn ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn primary" onclick="saveForm('${m.id}', ${editing})">${editing?'Guardar cambios':'Crear ficha'}</button>
+    </div>
+  `;
+  openModal();
+}
+
+/* Lee el formulario y guarda (crea o actualiza) */
+function saveForm(id, editing){
+  const g = sel => $('#'+sel).value;
+  const data = {
+    id,
+    titulo: g('fm-titulo'), anio: g('fm-anio'), duracion_min: g('fm-duracion'),
+    pais: g('fm-pais'), genero: g('fm-genero'), direccion: g('fm-direccion'),
+    guion: g('fm-guion'), reparto: g('fm-reparto'), musica: g('fm-musica'),
+    sinopsis: g('fm-sinopsis'), poster_url: g('fm-poster'), filmaffinity_url: g('fm-fa'),
+    fecha_visionado: g('fm-fecha'), cine: g('fm-cine'),
+    nota1: g('fm-nota1')===''?null:g('fm-nota1'),
+    nota2: g('fm-nota2')===''?null:g('fm-nota2'),
+  };
+  const norm = normalizeMovie(data);
+  if(editing){
+    // Conservamos el póster local que ya tuviera
+    const prev = movies.find(x=>x.id===id);
+    if(prev) norm.poster_local = prev.poster_local;
+    const i = movies.findIndex(x=>x.id===id);
+    norm.id = id; movies[i] = norm;
+  }else{
+    movies.push(norm);
+  }
+  saveState(); closeModal(); refreshFilters(); renderCollection();
+  showBanner('ok', editing?'✓ Ficha actualizada.':'✓ Ficha creada.', 2500);
+}
+
+function deleteMovie(id){
+  if(!confirm('¿Borrar esta película de tu colección?')) return;
+  movies = movies.filter(x=>x.id!==id);
+  saveState(); closeModal(); refreshFilters(); renderCollection();
+  showBanner('ok','Ficha eliminada.',2000);
+}
+
+/* ===========================================================================
+   POSTERS: subida de imagen local (con reescalado para ahorrar espacio)
+   =========================================================================== */
+function handlePosterUpload(id, file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    const img = new Image();
+    img.onload = ()=>{
+      // Reescalamos a máx. 500px de ancho y comprimimos a JPEG para no saturar localStorage
+      const maxW = 500;
+      const scale = Math.min(1, maxW/img.width);
+      const c = document.createElement('canvas');
+      c.width = img.width*scale; c.height = img.height*scale;
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.82);
+      const m = movies.find(x=>x.id===id);
+      if(m){ m.poster_local = dataUrl; saveState(); openDetail(id); renderCollection(); }
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+/* ===========================================================================
+   D. COLECCIÓN
+   =========================================================================== */
+/* Devuelve la URL de póster a usar: prioriza la URL externa; si no, la local */
+function posterSrc(m){ return m.poster_url || m.poster_local || ''; }
+
+/* Aplica filtros + búsqueda + orden y devuelve la lista a mostrar */
+function getFiltered(){
+  let list = movies.filter(m=>{
+    if(filters.search && !fold(m.titulo).includes(fold(filters.search))) return false;
+    if(filters.director && !m.direccion.includes(filters.director)) return false;
+    if(filters.genero && !m.genero.includes(filters.genero)) return false;
+    if(filters.pais && !m.pais.includes(filters.pais)) return false;
+    if(filters.cine && m.cine !== filters.cine) return false;
+    return true;
+  });
+  const s = filters.sort;
+  list.sort((a,b)=>{
+    if(s==='nota_desc') return (media(b)??-1)-(media(a)??-1);
+    if(s==='nota_asc')  return (media(a)??99)-(media(b)??99);
+    if(s==='anio_desc') return b.anio-a.anio;
+    if(s==='anio_asc')  return a.anio-b.anio;
+    if(s==='titulo_asc')return a.titulo.localeCompare(b.titulo,'es');
+    if(s==='fecha_asc') return (a.fecha_visionado||'').localeCompare(b.fecha_visionado||'');
+    // fecha_desc por defecto
+    return (b.fecha_visionado||'').localeCompare(a.fecha_visionado||'');
+  });
+  return list;
+}
+
+function renderCollection(){
+  const grid = $('#grid');
+  const list = getFiltered();
+
+  // Chips de filtros activos (clicables para quitarlos)
+  renderActiveFilters();
+
+  if(!movies.length){
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      Aún no hay películas. Ve a <b>«Añadir»</b> para pegar un JSON o crear una ficha a mano.</div>`;
+    return;
+  }
+  if(!list.length){
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">Ninguna película coincide con los filtros.</div>`;
+    return;
+  }
+
+  grid.innerHTML = list.map(m=>{
+    const src = posterSrc(m);
+    const med = media(m);
+    const badges = [];
+    if(m.nota1!=null) badges.push(`<span class="score-badge">${fmtNota(m.nota1)}</span>`);
+    if(m.nota2!=null) badges.push(`<span class="score-badge">${fmtNota(m.nota2)}</span>`);
+    if(med!=null) badges.push(`<span class="score-badge avg">★ ${fmtNota(med)}</span>`);
+
+    // Si hay src, intentamos <img>; onerror muestra el hueco de respaldo
+    const poster = src
+      ? `<img src="${esc(src)}" alt="${esc(m.titulo)}"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+         <div class="poster-fallback" style="display:none">
+            <div class="ttl">${esc(m.titulo)}</div><div>Imagen no disponible</div></div>`
+      : `<div class="poster-fallback">
+            <div class="ttl">${esc(m.titulo)}</div><div>Sin póster</div></div>`;
+
+    return `<div class="card" onclick="openDetail('${m.id}')">
+      <div class="poster-wrap">
+        ${poster}
+        <div class="card-scores">${badges.join('')}</div>
+      </div>
+      <div class="card-meta">
+        <div class="card-title">${esc(m.titulo)}</div>
+        <div class="card-year">${m.anio||''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* Rellena los desplegables de filtro con los valores presentes en la colección */
+function refreshFilters(){
+  const uniq = (arrs)=> [...new Set(arrs.flat())].filter(Boolean).sort((a,b)=>a.localeCompare(b,'es'));
+  const dirs   = uniq(movies.map(m=>m.direccion));
+  const gens   = uniq(movies.map(m=>m.genero));
+  const paises = uniq(movies.map(m=>m.pais));
+  const cines  = uniq(movies.map(m=>m.cine?[m.cine]:[]));
+
+  fillSelect('#f-director', dirs, 'Director/a (todos)');
+  fillSelect('#f-genero', gens, 'Género (todos)');
+  fillSelect('#f-pais', paises, 'País (todos)');
+  fillSelect('#f-cine', cines, 'Cine (todos)');
+}
+function fillSelect(sel, items, placeholder){
+  const el = $(sel); const current = el.value;
+  el.innerHTML = `<option value="">${placeholder}</option>` +
+    items.map(i=>`<option value="${esc(i)}">${esc(i)}</option>`).join('');
+  if(items.includes(current)) el.value = current;
+}
+
+/* Chips de filtros activos */
+function renderActiveFilters(){
+  const cont = $('#active-filters'); const chips=[];
+  const add=(k,label,v)=>{ if(v) chips.push(`<button class="chip-filter" onclick="clearFilter('${k}')">${label}: ${esc(v)} <span class="x">✕</span></button>`); };
+  add('director','Director', filters.director);
+  add('genero','Género', filters.genero);
+  add('pais','País', filters.pais);
+  add('cine','Cine', filters.cine);
+  cont.innerHTML = chips.join('');
+}
+function clearFilter(k){
+  filters[k]='';
+  // Sincroniza el desplegable correspondiente
+  const map={director:'#f-director',genero:'#f-genero',pais:'#f-pais',cine:'#f-cine'};
+  if(map[k]) $(map[k]).value='';
+  renderCollection();
+}
+
+/* Click en director/género/país desde la ficha → filtra la colección */
+function filterBy(k, value){
+  filters[k]=value;
+  const map={director:'#f-director',genero:'#f-genero',pais:'#f-pais',cine:'#f-cine'};
+  if(map[k]) $(map[k]).value=value;
+  closeModal();
+  switchTab('coleccion');
+  renderCollection();
+}
+
+/* ===========================================================================
+   E. FICHA DETALLADA
+   =========================================================================== */
+function openDetail(id){
+  const m = movies.find(x=>x.id===id); if(!m) return;
+  $('#modal-title').textContent = 'Ficha';
+  const src = posterSrc(m);
+  const med = media(m);
+
+  const chipList = (k, arr, clickable)=> arr.length
+    ? `<div class="chips">${arr.map(v=>`<span class="chip ${clickable?'click':''}" ${clickable?`onclick="filterBy('${k}','${esc(v).replace(/'/g,"\\'")}')"`:''}>${esc(v)}</span>`).join('')}</div>`
+    : '<span style="color:var(--muted)">—</span>';
+
+  const poster = src
+    ? `<img src="${esc(src)}" alt="${esc(m.titulo)}"
+          onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+       <div class="poster-fallback" style="display:none"><div class="ttl">${esc(m.titulo)}</div><div>Imagen no disponible</div></div>`
+    : `<div class="poster-fallback"><div class="ttl">${esc(m.titulo)}</div><div>Sin póster</div></div>`;
+
+  $('#modal-body').innerHTML = `
+    <div class="detail">
+      <div class="poster-col">
+        <div class="poster-wrap" style="aspect-ratio:2/3">${poster}</div>
+        <button class="btn sm" style="width:100%;margin-top:10px" onclick="$('#poster-file').click()">Subir imagen…</button>
+        <input id="poster-file" type="file" accept="image/*" style="display:none"
+               onchange="handlePosterUpload('${m.id}', this.files[0])">
+        ${m.filmaffinity_url?`<a class="btn sm" style="width:100%;margin-top:8px" href="${esc(m.filmaffinity_url)}" target="_blank" rel="noopener">Ver en FilmAffinity ↗</a>`:''}
+      </div>
+      <div class="info-col">
+        <h2 class="dtitle">${esc(m.titulo)} <span class="dyear">${m.anio||''}</span></h2>
+        <div style="color:var(--muted);font-size:14px;margin-top:4px">
+          ${m.duracion_min?m.duracion_min+' min':''}${m.duracion_min&&m.pais.length?' · ':''}${esc(m.pais.join(', '))}
+        </div>
+
+        <div class="scores-detail">
+          <div class="score-card"><div class="who">${esc(settings.p1)}</div><div class="val">${fmtNota(m.nota1)}</div></div>
+          <div class="score-card"><div class="who">${esc(settings.p2)}</div><div class="val">${fmtNota(m.nota2)}</div></div>
+          <div class="score-card avg"><div class="who">Media</div><div class="val">${fmtNota(med)}</div></div>
+        </div>
+
+        <div class="meta-row"><span class="k">Visionado</span>
+          ${m.fecha_visionado?formatFecha(m.fecha_visionado):'—'}${m.cine?` · <b>${esc(m.cine)}</b>`:''}
+        </div>
+        <div class="meta-row"><span class="k">Dirección</span>${chipList('director', m.direccion, true)}</div>
+        <div class="meta-row"><span class="k">Género</span>${chipList('genero', m.genero, true)}</div>
+        <div class="meta-row"><span class="k">País</span>${chipList('pais', m.pais, true)}</div>
+        ${m.guion.length?`<div class="meta-row"><span class="k">Guion</span>${chipList('',m.guion,false)}</div>`:''}
+        ${m.musica.length?`<div class="meta-row"><span class="k">Música</span>${chipList('',m.musica,false)}</div>`:''}
+        ${m.reparto.length?`<div class="meta-row"><span class="k">Reparto</span><span style="font-size:14px">${esc(m.reparto.join(', '))}</span></div>`:''}
+        ${m.sinopsis?`<div class="meta-row"><span class="k">Sinopsis</span><p class="sinopsis">${esc(m.sinopsis)}</p></div>`:''}
+
+        <div class="form-actions" style="justify-content:flex-start;margin-top:18px">
+          <button class="btn primary sm" onclick="openForm('${m.id}')">Editar / añadir notas</button>
+          <button class="btn danger sm" onclick="deleteMovie('${m.id}')">Borrar</button>
+        </div>
+      </div>
+    </div>`;
+  openModal();
+}
+function formatFecha(iso){
+  try{
+    const d = new Date(iso+'T00:00:00');
+    return d.toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'});
+  }catch(e){ return iso; }
+}
+
+/* ===========================================================================
+   F. ESTADÍSTICAS
+   =========================================================================== */
+let mapInstance = null;
+
+function renderStats(){
+  const cont = $('#stats-content');
+  if(!movies.length){ cont.innerHTML = `<div class="empty-state">Aún no hay datos. Añade películas para ver tus estadísticas.</div>`; return; }
+
+  // ---- KPIs ----
+  const totalMin = movies.reduce((a,m)=>a+(m.duracion_min||0),0);
+  const horas = Math.floor(totalMin/60);
+  const cineFav = mode(movies.map(m=>m.cine).filter(Boolean));
+
+  // ---- Histograma de notas (p1, p2, media) por enteros 1..10 ----
+  const buckets = (key)=>{
+    const arr = new Array(11).fill(0); // 0..10
+    movies.forEach(m=>{
+      let v = key==='avg'?media(m):m[key];
+      if(v==null||isNaN(v)) return;
+      arr[Math.round(v)]++;
+    });
+    return arr;
+  };
+  const h1 = buckets('nota1'), h2 = buckets('nota2'), hA = buckets('avg');
+
+  // ---- Géneros / directores / países / décadas / meses ----
+  const genCount = countFlat(movies.map(m=>m.genero));
+  const dirCount = countFlat(movies.map(m=>m.direccion));
+  const decCount = {};
+  movies.forEach(m=>{ if(m.anio){ const d = Math.floor(m.anio/10)*10; decCount[d+'s']=(decCount[d+'s']||0)+1; } });
+  const monthCount = {};
+  movies.forEach(m=>{ if(m.fecha_visionado){ const mm=m.fecha_visionado.slice(0,7); monthCount[mm]=(monthCount[mm]||0)+1; } });
+  const paisCount = countFlat(movies.map(m=>m.pais));
+
+  cont.innerHTML = `
+    <div class="kpis">
+      <div class="kpi"><div class="num">${movies.length}</div><div class="lab">Películas vistas</div></div>
+      <div class="kpi"><div class="num">${horas}<span style="font-size:16px">h</span></div><div class="lab">${totalMin.toLocaleString('es-ES')} min en sala</div></div>
+      <div class="kpi"><div class="num" style="font-size:22px">${cineFav?esc(cineFav.k):'—'}</div><div class="lab">Cine favorito${cineFav?` · ${cineFav.n} visitas`:''}</div></div>
+      <div class="kpi"><div class="num">${Object.keys(paisCount).length}</div><div class="lab">Países distintos</div></div>
+    </div>
+
+    <div class="stats-grid">
+      <!-- Distribución de notas -->
+      <div class="stat-card wide">
+        <h3>Distribución de notas</h3>
+        <div class="legend">
+          <span class="li"><span class="sw" style="background:var(--accent)"></span>${esc(settings.p1)}</span>
+          <span class="li"><span class="sw" style="background:var(--accent);opacity:.55"></span>${esc(settings.p2)}</span>
+          <span class="li"><span class="sw" style="background:var(--muted)"></span>Media</span>
+        </div>
+        ${histTriple(h1,h2,hA)}
+      </div>
+
+      <!-- Géneros -->
+      <div class="stat-card"><h3>Géneros más vistos</h3>${barChart(genCount, 8)}</div>
+      <!-- Directores -->
+      <div class="stat-card"><h3>Directores más vistos</h3>${barChart(dirCount, 8)}</div>
+      <!-- Décadas -->
+      <div class="stat-card"><h3>Por década de la película</h3>${barChart(decCount, 12, true)}</div>
+      <!-- Ritmo mensual -->
+      <div class="stat-card"><h3>Ritmo de visionado por mes</h3>${barChart(monthCount, 12, true)}</div>
+
+      <!-- Mapa -->
+      <div class="stat-card wide">
+        <h3>Países de las películas vistas</h3>
+        <div id="mapa"></div>
+        <div id="map-fallback" class="map-fallback" style="margin-top:10px"></div>
+      </div>
+    </div>
+  `;
+
+  renderMapa(paisCount);
+}
+
+/* Cuenta frecuencias de un array de arrays (géneros, directores…) */
+function countFlat(arrs){
+  const c={}; arrs.flat().forEach(v=>{ if(v) c[v]=(c[v]||0)+1; }); return c;
+}
+/* Moda (valor más frecuente) de un array */
+function mode(arr){
+  if(!arr.length) return null;
+  const c={}; arr.forEach(v=>c[v]=(c[v]||0)+1);
+  const k = Object.keys(c).sort((a,b)=>c[b]-c[a])[0];
+  return {k, n:c[k]};
+}
+
+/* Gráfico de barras horizontales a partir de un objeto {etiqueta:valor} */
+function barChart(obj, limit, keepOrder){
+  let entries = Object.entries(obj);
+  if(!entries.length) return '<p class="muted-note">Sin datos.</p>';
+  if(keepOrder){ entries.sort((a,b)=>a[0].localeCompare(b[0])); }
+  else{ entries.sort((a,b)=>b[1]-a[1]); }
+  entries = entries.slice(0, limit||10);
+  const max = Math.max(...entries.map(e=>e[1]));
+  return `<div class="bars">${entries.map(([k,v])=>`
+    <div class="bar-row">
+      <span class="blab" title="${esc(k)}">${esc(k)}</span>
+      <span class="bar-track"><span class="bar-fill" style="width:${(v/max*100).toFixed(1)}%"></span></span>
+      <span class="bval">${v}</span>
+    </div>`).join('')}</div>`;
+}
+
+/* Histograma triple (3 series superpuestas) de notas 0..10 */
+function histTriple(h1,h2,hA){
+  const max = Math.max(1, ...h1,...h2,...hA);
+  let cols='';
+  for(let i=1;i<=10;i++){
+    cols += `<div class="hcol">
+      <div style="display:flex;gap:2px;align-items:flex-end;height:100%;width:100%">
+        <div class="hbar" style="height:${h1[i]/max*100}%;background:var(--accent)" title="${esc(settings.p1)}: ${h1[i]}"></div>
+        <div class="hbar" style="height:${h2[i]/max*100}%;background:var(--accent);opacity:.55" title="${esc(settings.p2)}: ${h2[i]}"></div>
+        <div class="hbar" style="height:${hA[i]/max*100}%;background:var(--muted)" title="Media: ${hA[i]}"></div>
+      </div>
+      <div class="hlab">${i}</div>
+    </div>`;
+  }
+  return `<div class="hist">${cols}</div>`;
+}
+
+/* ----- Mapa mundial (jsVectorMap por CDN; con respaldo en texto) ----- */
+function renderMapa(paisCount){
+  const fb = $('#map-fallback');
+  // Pasamos nombres de país (en varios idiomas) a códigos ISO-2 que entiende el mapa
+  const iso = {}; const noMatch=[];
+  Object.entries(paisCount).forEach(([nombre,n])=>{
+    const code = paisAISO(nombre);
+    if(code) iso[code] = (iso[code]||0)+n;
+    else noMatch.push(nombre);
+  });
+
+  // Si la librería no cargó (sin internet), mostramos lista
+  if(typeof jsVectorMap === 'undefined'){
+    $('#mapa').innerHTML = '';
+    fb.innerHTML = '🌐 El mapa necesita conexión a internet (librería por CDN). Países de tu colección: ' +
+      Object.entries(paisCount).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(k)} (${v})`).join(', ');
+    return;
+  }
+
+  // Limpia instancia previa para poder re-renderizar
+  $('#mapa').innerHTML='';
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#00e054';
+  try{
+    mapInstance = new jsVectorMap({
+      selector:'#mapa', map:'world',
+      backgroundColor:'transparent',
+      zoomButtons:true,
+      regionStyle:{ initial:{ fill:'#2c3440', stroke:'#14181c', strokeWidth:.4 } },
+      // Coloreamos según número de películas por país
+      series:{ regions:[{
+        attribute:'fill',
+        values:iso,
+        scale:['#37414d', accent],
+        normalizeFunction:'polynomial'
+      }]},
+      onRegionTooltipShow(event, tooltip, code){
+        const n = iso[code];
+        if(n) tooltip.text(tooltip.text()+` — ${n} película(s)`);
+      }
+    });
+    // Nota sobre países no reconocidos
+    fb.innerHTML = noMatch.length
+      ? `<span style="color:var(--warn)">Sin ubicar en el mapa: ${noMatch.map(esc).join(', ')}.</span>`
+      : '';
+  }catch(e){
+    fb.innerHTML = 'No se pudo dibujar el mapa: '+e.message;
+  }
+}
+
+/* ===========================================================================
+   G. AJUSTES Y TEMAS
+   =========================================================================== */
+function applyTheme(){
+  document.documentElement.style.setProperty('--accent', settings.accent);
+  document.documentElement.setAttribute('data-palette', settings.palette);
+}
+function buildSettingsUI(){
+  // Nombres
+  $('#set-p1').value = settings.p1;
+  $('#set-p2').value = settings.p2;
+  // Acentos predefinidos
+  $('#swatches').innerHTML = ACCENTS.map(c=>
+    `<span class="swatch ${c===settings.accent?'active':''}" style="background:${c}" onclick="setAccent('${c}')"></span>`).join('');
+  $('#accent-custom').value = settings.accent;
+  // Paletas
+  const pals = [['letterboxd','Letterboxd'],['carbon','Carbón'],['medianoche','Medianoche']];
+  $('#palettes').innerHTML = pals.map(([id,label])=>
+    `<span class="palette-opt ${id===settings.palette?'active':''}" onclick="setPalette('${id}')">${label}</span>`).join('');
+}
+function setAccent(c){ settings.accent=c; applyTheme(); saveState(); buildSettingsUI(); if($('#stats').classList.contains('active')) renderStats(); }
+function setPalette(p){ settings.palette=p; applyTheme(); saveState(); buildSettingsUI(); }
+function saveNames(){
+  settings.p1 = $('#set-p1').value.trim() || 'Persona 1';
+  settings.p2 = $('#set-p2').value.trim() || 'Persona 2';
+  saveState(); buildSettingsUI();
+  showBanner('ok','✓ Nombres guardados.',2000);
+}
+
+/* ===========================================================================
+   H. EXPORTAR / IMPORTAR
+   =========================================================================== */
+function exportJSON(){
+  const data = { app:'mi-cine', version:1, exported:new Date().toISOString(), settings, movies };
+  const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `mi-cine-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showBanner('ok','✓ Copia de seguridad descargada.',2500);
+}
+function importJSON(ev){
+  const file = ev.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const data = JSON.parse(e.target.result);
+      const imported = Array.isArray(data) ? data : (data.movies||[]);
+      if(!Array.isArray(imported)) throw new Error('Formato no reconocido.');
+      if(data.settings) settings = Object.assign(settings, data.settings);
+      // Sustituimos la colección por la importada (normalizando)
+      movies = imported.map(normalizeMovie);
+      applyTheme(); saveState(); buildSettingsUI(); refreshFilters(); renderCollection();
+      showBanner('ok',`✓ Importadas ${movies.length} película(s).`,3000);
+    }catch(err){
+      showBanner('bad','❌ No se pudo importar: '+err.message);
+    }
+  };
+  reader.readAsText(file);
+  ev.target.value=''; // permite reimportar el mismo archivo
+}
+function wipeAll(){
+  if(!confirm('Esto borrará TODA tu colección de este navegador. ¿Seguro? (Exporta antes una copia si quieres conservarla.)')) return;
+  movies=[]; saveState(); refreshFilters(); renderCollection();
+  showBanner('warn','Colección borrada.',2500);
+}
+
+/* ===========================================================================
+   MODAL / NAVEGACIÓN
+   =========================================================================== */
+function openModal(){ $('#modal').classList.add('show'); document.body.style.overflow='hidden'; }
+function closeModal(){ $('#modal').classList.remove('show'); document.body.style.overflow=''; }
+$('#modal').addEventListener('click', e=>{ if(e.target.id==='modal') closeModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+function switchTab(tab){
+  $$('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  $$('.view').forEach(v=>v.classList.toggle('active', v.id===tab));
+  if(tab==='stats') renderStats();
+  if(tab==='ajustes') checkStorage();
+}
+$$('nav.tabs button').forEach(b=> b.addEventListener('click', ()=>switchTab(b.dataset.tab)) );
+
+/* Listeners de filtros/búsqueda */
+$('#search').addEventListener('input', e=>{ filters.search=e.target.value; renderCollection(); });
+['f-director','f-genero','f-pais','f-cine','f-sort'].forEach(id=>{
+  $('#'+id).addEventListener('change', e=>{
+    const key = id.replace('f-','');
+    filters[key]= e.target.value;
+    renderCollection();
+  });
+});
+$('#accent-custom').addEventListener('input', e=> setAccent(e.target.value));
+
+/* ===========================================================================
+   I. ARRANQUE
+   =========================================================================== */
+loadState();
+applyTheme();
+buildSettingsUI();
+refreshFilters();
+renderCollection();
+checkStorage();
+
+/* ===========================================================================
+   TABLA DE PAÍSES → ISO-2 (para el mapa). Acepta nombres en español e inglés.
+   Si un país no está aquí, simplemente aparecerá en "Sin ubicar en el mapa".
+   Puedes ampliar esta tabla fácilmente.
+   =========================================================================== */
+const PAIS_ISO = {
+  'espana':'ES','spain':'ES','estados unidos':'US','eeuu':'US','usa':'US','united states':'US',
+  'reino unido':'GB','uk':'GB','united kingdom':'GB','inglaterra':'GB','gran bretana':'GB',
+  'francia':'FR','france':'FR','alemania':'DE','germany':'DE','italia':'IT','italy':'IT',
+  'portugal':'PT','irlanda':'IE','ireland':'IE','belgica':'BE','belgium':'BE',
+  'paises bajos':'NL','holanda':'NL','netherlands':'NL','suiza':'CH','switzerland':'CH',
+  'austria':'AT','suecia':'SE','sweden':'SE','noruega':'NO','norway':'NO',
+  'dinamarca':'DK','denmark':'DK','finlandia':'FI','finland':'FI','islandia':'IS',
+  'polonia':'PL','poland':'PL','republica checa':'CZ','chequia':'CZ','czech republic':'CZ',
+  'hungria':'HU','hungary':'HU','rumania':'RO','romania':'RO','grecia':'GR','greece':'GR',
+  'rusia':'RU','russia':'RU','ucrania':'UA','ukraine':'UA','turquia':'TR','turkey':'TR',
+  'mexico':'MX','méxico':'MX','argentina':'AR','chile':'CL','colombia':'CO','peru':'PE','perú':'PE',
+  'brasil':'BR','brazil':'BR','uruguay':'UY','venezuela':'VE','bolivia':'BO','ecuador':'EC',
+  'cuba':'CU','canada':'CA','canadá':'CA','japon':'JP','japón':'JP','japan':'JP',
+  'china':'CN','corea del sur':'KR','south korea':'KR','corea':'KR','india':'IN',
+  'tailandia':'TH','thailand':'TH','indonesia':'ID','filipinas':'PH','vietnam':'VN',
+  'iran':'IR','irán':'IR','israel':'IL','egipto':'EG','egypt':'EG','marruecos':'MA','morocco':'MA',
+  'sudafrica':'ZA','sudáfrica':'ZA','south africa':'ZA','nigeria':'NG','australia':'AU',
+  'nueva zelanda':'NZ','new zealand':'NZ','taiwan':'TW','taiwán':'TW','hong kong':'HK'
+};
+function paisAISO(nombre){
+  const key = fold(nombre);
+  return PAIS_ISO[key] || null;
+}
+</script>
+</body>
+</html>
