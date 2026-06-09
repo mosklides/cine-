@@ -146,34 +146,43 @@ main{max-width:1180px;margin:0 auto;padding:26px 20px 80px}
   padding:5px 10px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;border:0;
 }
 .chip-filter .x{font-weight:800;opacity:.7}
+/* Barra Buscar / Filtrar (Colección) */
+.col-toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.col-panel{margin-bottom:16px;animation:fade .2s ease}
+.col-panel .input.search{width:100%}
+.col-filtros{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn.btn-on{border-color:var(--accent);color:var(--accent)}
 
 /* ===========================================================================
    6. REJILLA DE PÓSTERS (estética Letterboxd)
    =========================================================================== */
 .grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
-  gap:18px;
+  grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+  gap:16px;
 }
 .card{
-  cursor:pointer;position:relative;border-radius:10px;overflow:hidden;
+  cursor:pointer;display:flex;align-items:stretch;min-height:165px;
+  border-radius:10px;overflow:hidden;
   background:var(--bg-2);border:1px solid var(--line);
   transition:transform .18s ease, box-shadow .18s ease, border-color .18s;
 }
-.card:hover{transform:translateY(-4px);box-shadow:var(--shadow);border-color:var(--accent)}
-.poster-wrap{aspect-ratio:2/3;position:relative;background:var(--bg-3)}
-.poster-wrap img{width:100%;height:100%;object-fit:cover;display:block}
+.card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:var(--accent)}
+.poster-wrap{flex:0 0 34%;position:relative;background:var(--bg-3)}
+.poster-wrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
 .poster-fallback{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;text-align:center;padding:12px;gap:8px;color:var(--muted);
-  font-size:13px;background:linear-gradient(160deg,var(--bg-3),var(--bg-2));
+  justify-content:center;text-align:center;padding:12px;gap:6px;color:var(--muted);
+  font-size:12px;background:linear-gradient(160deg,var(--bg-3),var(--bg-2));
 }
-.poster-fallback .ttl{font-family:var(--font-disp);font-weight:700;color:var(--text);font-size:15px}
-.card-meta{padding:9px 10px}
-.card-title{font-size:13.5px;font-weight:600;line-height:1.25;
+.poster-fallback .ttl{font-family:var(--font-disp);font-weight:700;color:var(--text);font-size:14px;line-height:1.15}
+.card-meta{flex:1;min-width:0;padding:14px 16px;display:flex;flex-direction:column;gap:7px}
+.card-title{font-size:15px;font-weight:600;line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.card-year{color:var(--muted);font-size:12px;margin-top:2px}
-/* insignias de nota sobre el póster */
+.card-title .card-year{color:var(--muted);font-weight:500}
+.card-line{font-size:13px;color:var(--muted);line-height:1.3}
+.card-line .k{color:var(--text);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.4px;margin-right:5px}
+/* insignia de nota media sobre el póster */
 .card-scores{position:absolute;top:8px;left:8px;display:flex;gap:5px}
 .score-badge{
   font-size:11px;font-weight:700;padding:3px 7px;border-radius:999px;
@@ -261,6 +270,10 @@ textarea{resize:vertical;min-height:80px}
 .kpi .num.text{font-size:20px;color:var(--text)}
 .kpi .num .u{font-size:15px;color:var(--muted);font-weight:700;margin-left:2px}
 .kpi .sub{color:var(--muted);font-size:12.5px;margin-top:5px}
+.kpi.kpi-click{cursor:pointer}
+.kpi.kpi-click:hover{border-color:var(--accent)}
+.kpi-caret{color:var(--muted);font-size:12px;font-weight:700;margin-left:3px}
+.dist-panel{margin-bottom:18px;animation:fade .25s ease}
 
 /* Barras horizontales (gráficos sin librería) */
 .bars{display:flex;flex-direction:column;gap:9px}
@@ -303,6 +316,7 @@ textarea{resize:vertical;min-height:80px}
   .detail .poster-col{max-width:220px;margin:0 auto}
   .form-grid{grid-template-columns:1fr}
   .bar-row{grid-template-columns:90px 1fr 40px}
+  .grid{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -330,8 +344,14 @@ textarea{resize:vertical;min-height:80px}
 
   <!-- ============ VISTA: COLECCIÓN ============ -->
   <section id="coleccion" class="view active">
-    <div class="controls">
-      <input id="search" class="input search" type="text" placeholder="🔎  Buscar por título…">
+    <div class="col-toolbar">
+      <button class="btn" id="btn-buscar" onclick="togglePanel('buscar')">🔎 Buscar</button>
+      <button class="btn" id="btn-filtrar" onclick="togglePanel('filtrar')">⚙ Filtrar</button>
+    </div>
+    <div id="panel-buscar" class="col-panel" style="display:none">
+      <input id="search" class="input search" type="text" placeholder="Buscar por título…">
+    </div>
+    <div id="panel-filtrar" class="col-panel col-filtros" style="display:none">
       <select id="f-director"><option value="">Director/a (todos)</option></select>
       <select id="f-genero"><option value="">Género (todos)</option></select>
       <select id="f-pais"><option value="">País (todos)</option></select>
@@ -837,10 +857,7 @@ function renderCollection(){
   grid.innerHTML = list.map(m=>{
     const src = posterSrc(m);
     const med = media(m);
-    const badges = [];
-    if(m.nota1!=null) badges.push(`<span class="score-badge">${fmtNota(m.nota1)}</span>`);
-    if(m.nota2!=null) badges.push(`<span class="score-badge">${fmtNota(m.nota2)}</span>`);
-    if(med!=null) badges.push(`<span class="score-badge avg">★ ${fmtNota(med)}</span>`);
+    const badge = med!=null ? `<span class="score-badge avg">★ ${fmtNota(med)}</span>` : '';
 
     // Si hay src, intentamos <img>; onerror muestra el hueco de respaldo
     const poster = src
@@ -854,11 +871,12 @@ function renderCollection(){
     return `<div class="card" onclick="openDetail('${m.id}')">
       <div class="poster-wrap">
         ${poster}
-        <div class="card-scores">${badges.join('')}</div>
+        <div class="card-scores">${badge}</div>
       </div>
       <div class="card-meta">
-        <div class="card-title">${esc(m.titulo)}</div>
-        <div class="card-year">${m.anio||''}</div>
+        <div class="card-title">${esc(m.titulo)} <span class="card-year">${m.anio||''}</span></div>
+        <div class="card-line"><span class="k">Vista</span>${m.fecha_visionado?formatFecha(m.fecha_visionado):'—'}</div>
+        <div class="card-line"><span class="k">Cine</span>${m.cine?esc(m.cine):'—'}</div>
       </div>
     </div>`;
   }).join('');
@@ -979,6 +997,15 @@ function formatFecha(iso){
    F. ESTADÍSTICAS
    =========================================================================== */
 let mapInstance = null;
+let distOpen = false;
+/* Despliega/colapsa el panel de distribución de notas bajo los KPIs */
+function toggleDist(){
+  distOpen = !distOpen;
+  const p = document.getElementById('dist-panel');
+  if(p) p.style.display = distOpen ? 'block' : 'none';
+  const c = document.getElementById('dist-caret');
+  if(c) c.textContent = distOpen ? '▴' : '▾';
+}
 
 function renderStats(){
   const cont = $('#stats-content');
@@ -1032,14 +1059,13 @@ function renderStats(){
           ${cineFav?`<div class="sub">${cineFav.n} visitas</div>`:''}
         </div>
       </div>
-      <div class="kpi">
-        <div class="lab">Nota media</div>
+      <div class="kpi kpi-click" onclick="toggleDist()" title="Ver distribución de notas">
+        <div class="lab">Nota media <span id="dist-caret" class="kpi-caret">${distOpen?'▴':'▾'}</span></div>
         <div class="val"><div class="num">${notaMediaTotal!=null?fmtNota(notaMediaTotal):'–'}</div></div>
       </div>
     </div>
 
-    <div class="stats-grid">
-      <!-- Distribución de notas -->
+    <div id="dist-panel" class="dist-panel" style="display:${distOpen?'block':'none'}">
       <div class="stat-card wide">
         <h3>Distribución de notas</h3>
         <div class="legend">
@@ -1049,7 +1075,9 @@ function renderStats(){
         </div>
         ${histTriple(h1,h2,hA)}
       </div>
+    </div>
 
+    <div class="stats-grid">
       <!-- Géneros -->
       <div class="stat-card"><h3>Géneros más vistos</h3>${barChart(genCount, 8)}</div>
       <!-- Directores -->
@@ -1282,6 +1310,17 @@ function switchTab(tab){
   if(tab==='ajustes') showStorageInfo();
 }
 $$('nav.tabs button').forEach(b=> b.addEventListener('click', ()=>switchTab(b.dataset.tab)) );
+
+/* Despliega/colapsa los paneles de Buscar y Filtrar en la Colección */
+function togglePanel(which){
+  const panelSel = {buscar:'#panel-buscar', filtrar:'#panel-filtrar'}[which];
+  const btnSel   = {buscar:'#btn-buscar',   filtrar:'#btn-filtrar'}[which];
+  const p = $(panelSel);
+  const open = p.style.display === 'none';
+  p.style.display = open ? '' : 'none';
+  $(btnSel).classList.toggle('btn-on', open);
+  if(open && which==='buscar') $('#search').focus();
+}
 
 /* Listeners de filtros/búsqueda */
 $('#search').addEventListener('input', e=>{ filters.search=e.target.value; renderCollection(); });
