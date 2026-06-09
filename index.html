@@ -253,9 +253,14 @@ textarea{resize:vertical;min-height:80px}
 .stat-card h3{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:8px}
 .stat-card.wide{grid-column:1 / -1}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-bottom:18px}
-.kpi{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
-.kpi .num{font-family:var(--font-disp);font-size:30px;font-weight:800;color:var(--accent)}
-.kpi .lab{color:var(--muted);font-size:13px;margin-top:2px}
+.kpi{background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;
+  min-height:118px;display:flex;flex-direction:column;justify-content:space-between;gap:8px}
+.kpi .lab{color:var(--text);font-family:var(--font-disp);font-weight:700;font-size:14.5px;line-height:1.25;letter-spacing:-.2px}
+.kpi .val{align-self:flex-end;text-align:right;line-height:1}
+.kpi .num{font-family:var(--font-disp);font-size:34px;font-weight:800;color:var(--accent);line-height:1}
+.kpi .num.text{font-size:20px;color:var(--text)}
+.kpi .num .u{font-size:15px;color:var(--muted);font-weight:700;margin-left:2px}
+.kpi .sub{color:var(--muted);font-size:12.5px;margin-top:5px}
 
 /* Barras horizontales (gráficos sin librería) */
 .bars{display:flex;flex-direction:column;gap:9px}
@@ -409,6 +414,7 @@ textarea{resize:vertical;min-height:80px}
         </div>
         <label class="field" style="margin-top:16px"><span style="color:var(--muted);font-size:12.5px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">Paleta de fondo</span></label>
         <div id="palettes" class="palette-opts"></div>
+        <button class="btn sm" style="margin-top:16px" onclick="resetAppearance()">Restablecer apariencia por defecto</button>
       </div>
 
       <!-- Copia de seguridad -->
@@ -473,13 +479,14 @@ const LS_SET = 'micine_ajustes_v1';
 
 /* ----- Estado en memoria ----- */
 let movies = [];
-let settings = { p1:'Persona 1', p2:'Persona 2', accent:'#00e054', palette:'letterboxd' };
+const DEFAULT_SETTINGS = { p1:'Tel', p2:'Lau', accent:'#3dd7c8', palette:'medianoche' };
+let settings = Object.assign({}, DEFAULT_SETTINGS);
 
 /* Filtros activos de la colección */
 let filters = { search:'', director:'', genero:'', pais:'', cine:'', sort:'fecha_desc' };
 
 /* Paletas de acento sugeridas (la primera es la de por defecto) */
-const ACCENTS = ['#00e054','#ff8000','#40bcf4','#ff5b87','#b388ff','#ffd000'];
+const ACCENTS = ['#3dd7c8','#00e054','#ff8000','#40bcf4','#ff5b87','#b388ff','#ffd000'];
 
 /* ===========================================================================
    A. PERSISTENCIA — Supabase
@@ -979,8 +986,12 @@ function renderStats(){
 
   // ---- KPIs ----
   const totalMin = movies.reduce((a,m)=>a+(m.duracion_min||0),0);
-  const horas = Math.floor(totalMin/60);
+  const dias = Math.floor(totalMin/1440);
+  const horasRest = Math.floor((totalMin%1440)/60);
+  const tiempoDH = (dias?dias+' d ':'') + horasRest + ' h';
   const cineFav = mode(movies.map(m=>m.cine).filter(Boolean));
+  const mediasPeli = movies.map(media).filter(n=>n!=null);
+  const notaMediaTotal = mediasPeli.length ? mediasPeli.reduce((a,b)=>a+b,0)/mediasPeli.length : null;
 
   // ---- Histograma de notas (p1, p2, media) por enteros 1..10 ----
   const buckets = (key)=>{
@@ -994,21 +1005,37 @@ function renderStats(){
   };
   const h1 = buckets('nota1'), h2 = buckets('nota2'), hA = buckets('avg');
 
-  // ---- Géneros / directores / países / décadas / meses ----
+  // ---- Géneros / directores / países / meses ----
   const genCount = countFlat(movies.map(m=>m.genero));
   const dirCount = countFlat(movies.map(m=>m.direccion));
-  const decCount = {};
-  movies.forEach(m=>{ if(m.anio){ const d = Math.floor(m.anio/10)*10; decCount[d+'s']=(decCount[d+'s']||0)+1; } });
   const monthCount = {};
   movies.forEach(m=>{ if(m.fecha_visionado){ const mm=m.fecha_visionado.slice(0,7); monthCount[mm]=(monthCount[mm]||0)+1; } });
   const paisCount = countFlat(movies.map(m=>m.pais));
 
   cont.innerHTML = `
     <div class="kpis">
-      <div class="kpi"><div class="num">${movies.length}</div><div class="lab">Películas vistas</div></div>
-      <div class="kpi"><div class="num">${horas}<span style="font-size:16px">h</span></div><div class="lab">${totalMin.toLocaleString('es-ES')} min en sala</div></div>
-      <div class="kpi"><div class="num" style="font-size:22px">${cineFav?esc(cineFav.k):'—'}</div><div class="lab">Cine favorito${cineFav?` · ${cineFav.n} visitas`:''}</div></div>
-      <div class="kpi"><div class="num">${Object.keys(paisCount).length}</div><div class="lab">Países distintos</div></div>
+      <div class="kpi">
+        <div class="lab">Películas vistas</div>
+        <div class="val"><div class="num">${movies.length}</div></div>
+      </div>
+      <div class="kpi">
+        <div class="lab">Tiempo en sala</div>
+        <div class="val">
+          <div class="num">${totalMin.toLocaleString('es-ES')}<span class="u">min</span></div>
+          <div class="sub">${tiempoDH}</div>
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="lab">Cine favorito</div>
+        <div class="val">
+          <div class="num text">${cineFav?esc(cineFav.k):'—'}</div>
+          ${cineFav?`<div class="sub">${cineFav.n} visitas</div>`:''}
+        </div>
+      </div>
+      <div class="kpi">
+        <div class="lab">Nota media</div>
+        <div class="val"><div class="num">${notaMediaTotal!=null?fmtNota(notaMediaTotal):'–'}</div></div>
+      </div>
     </div>
 
     <div class="stats-grid">
@@ -1027,10 +1054,8 @@ function renderStats(){
       <div class="stat-card"><h3>Géneros más vistos</h3>${barChart(genCount, 8)}</div>
       <!-- Directores -->
       <div class="stat-card"><h3>Directores más vistos</h3>${barChart(dirCount, 8)}</div>
-      <!-- Décadas -->
-      <div class="stat-card"><h3>Por década de la película</h3>${barChart(decCount, 12, true)}</div>
       <!-- Ritmo mensual -->
-      <div class="stat-card"><h3>Ritmo de visionado por mes</h3>${barChart(monthCount, 12, true)}</div>
+      <div class="stat-card"><h3>Ritmo de visionado por mes</h3>${barChart(monthCount, 12, true, mesLargo)}</div>
 
       <!-- Mapa -->
       <div class="stat-card wide">
@@ -1056,20 +1081,31 @@ function mode(arr){
   return {k, n:c[k]};
 }
 
-/* Gráfico de barras horizontales a partir de un objeto {etiqueta:valor} */
-function barChart(obj, limit, keepOrder){
+/* Gráfico de barras horizontales a partir de un objeto {etiqueta:valor}.
+   labelFn (opcional) transforma SOLO el texto mostrado; el orden sigue usando la clave. */
+function barChart(obj, limit, keepOrder, labelFn){
   let entries = Object.entries(obj);
   if(!entries.length) return '<p class="muted-note">Sin datos.</p>';
   if(keepOrder){ entries.sort((a,b)=>a[0].localeCompare(b[0])); }
   else{ entries.sort((a,b)=>b[1]-a[1]); }
   entries = entries.slice(0, limit||10);
   const max = Math.max(...entries.map(e=>e[1]));
-  return `<div class="bars">${entries.map(([k,v])=>`
+  return `<div class="bars">${entries.map(([k,v])=>{
+    const lab = labelFn ? labelFn(k) : k;
+    return `
     <div class="bar-row">
-      <span class="blab" title="${esc(k)}">${esc(k)}</span>
+      <span class="blab" title="${esc(lab)}">${esc(lab)}</span>
       <span class="bar-track"><span class="bar-fill" style="width:${(v/max*100).toFixed(1)}%"></span></span>
       <span class="bval">${v}</span>
-    </div>`).join('')}</div>`;
+    </div>`;
+  }).join('')}</div>`;
+}
+
+/* "2025-10" -> "octubre 2025" (mantiene la clave para ordenar cronológicamente) */
+const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+function mesLargo(ym){
+  const [y,m] = String(ym).split('-');
+  return `${MESES[Number(m)-1]||m} ${y}`;
 }
 
 /* Histograma triple (3 series superpuestas) de notas 0..10 */
@@ -1161,6 +1197,13 @@ function buildSettingsUI(){
 }
 function setAccent(c){ settings.accent=c; applyTheme(); saveSettings(); buildSettingsUI(); if($('#stats').classList.contains('active')) renderStats(); }
 function setPalette(p){ settings.palette=p; applyTheme(); saveSettings(); buildSettingsUI(); }
+function resetAppearance(){
+  settings.accent = DEFAULT_SETTINGS.accent;
+  settings.palette = DEFAULT_SETTINGS.palette;
+  applyTheme(); saveSettings(); buildSettingsUI();
+  if($('#stats').classList.contains('active')) renderStats();
+  showBanner('ok','✓ Apariencia restablecida a los valores por defecto.',2200);
+}
 function saveNames(){
   settings.p1 = $('#set-p1').value.trim() || 'Persona 1';
   settings.p2 = $('#set-p2').value.trim() || 'Persona 2';
