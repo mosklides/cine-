@@ -562,13 +562,13 @@ function movieToRow(m){
   };
 }
 
-/* Ajustes de UI se siguen guardando en localStorage */
-function saveState(){
+/* Persiste solo los ajustes de UI en localStorage (las películas viven en Supabase) */
+function saveSettings(){
   try{ localStorage.setItem(LS_SET, JSON.stringify(settings)); }catch(e){}
 }
 
-/* Sin límite local — función vacía para compatibilidad */
-function checkStorage(){
+/* Muestra una nota informativa en Ajustes sobre dónde se guardan los datos */
+function showStorageInfo(){
   const info = document.getElementById('storage-info');
   if(info) info.textContent = 'Los datos se almacenan en Supabase (sin límite local).';
 }
@@ -591,6 +591,10 @@ function esc(s){
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+/* Escapa un string para incrustarlo como literal JS dentro de un atributo HTML
+   (p.ej. onclick="..."). JSON.stringify pone las comillas y escapa el contenido;
+   esc() protege el resultado dentro del atributo HTML. */
+function jsArg(s){ return esc(JSON.stringify(String(s==null?'':s))); }
 /* Quita acentos y pasa a minúsculas (para búsquedas y para casar países) */
 function fold(s){
   return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
@@ -625,9 +629,7 @@ function normalizeMovie(raw){
     fecha_visionado: raw.fecha_visionado || '',
     cine: raw.cine || '',
     nota1: (raw.nota1===0||raw.nota1)?Number(raw.nota1):null,
-    nota2: (raw.nota2===0||raw.nota2)?Number(raw.nota2):null,
-    // Póster subido a mano (base64). Sólo se usa si falla / falta la URL.
-    poster_local: raw.poster_local || null
+    nota2: (raw.nota2===0||raw.nota2)?Number(raw.nota2):null
   };
 }
 
@@ -679,7 +681,7 @@ async function addFromJSON(){
     }
   }
 
-  saveState();
+  saveSettings();
   $('#json-input').value='';
   if(errores){
     msg.className='banner show warn';
@@ -759,7 +761,7 @@ async function saveForm(id, editing){
       await sbInsert(norm);
       movies.push(norm);
     }
-    saveState(); closeModal(); refreshFilters(); renderCollection();
+    saveSettings(); closeModal(); refreshFilters(); renderCollection();
     showBanner('ok', editing?'✓ Ficha actualizada.':'✓ Ficha creada.', 2500);
   }catch(e){
     showBanner('bad', '❌ Error al guardar: '+e.message);
@@ -771,7 +773,7 @@ async function deleteMovie(id){
   try{
     await sbDelete(id);
     movies = movies.filter(x=>x.id!==id);
-    saveState(); closeModal(); refreshFilters(); renderCollection();
+    saveSettings(); closeModal(); refreshFilters(); renderCollection();
     showBanner('ok','Ficha eliminada.',2000);
   }catch(e){
     showBanner('bad', '❌ Error al borrar: '+e.message);
@@ -779,34 +781,10 @@ async function deleteMovie(id){
 }
 
 /* ===========================================================================
-   POSTERS: subida de imagen local (con reescalado para ahorrar espacio)
-   =========================================================================== */
-function handlePosterUpload(id, file){
-  if(!file) return;
-  const reader = new FileReader();
-  reader.onload = e=>{
-    const img = new Image();
-    img.onload = ()=>{
-      // Reescalamos a máx. 500px de ancho y comprimimos a JPEG para no saturar localStorage
-      const maxW = 500;
-      const scale = Math.min(1, maxW/img.width);
-      const c = document.createElement('canvas');
-      c.width = img.width*scale; c.height = img.height*scale;
-      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-      const dataUrl = c.toDataURL('image/jpeg', 0.82);
-      const m = movies.find(x=>x.id===id);
-      if(m){ m.poster_local = dataUrl; saveState(); openDetail(id); renderCollection(); }
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
-}
-
-/* ===========================================================================
    D. COLECCIÓN
    =========================================================================== */
-/* Devuelve la URL de póster a usar: prioriza la URL externa; si no, la local */
-function posterSrc(m){ return m.poster_url || m.poster_local || ''; }
+/* Devuelve la URL de póster a usar (solo URL externa) */
+function posterSrc(m){ return m.poster_url || ''; }
 
 /* Aplica filtros + búsqueda + orden y devuelve la lista a mostrar */
 function getFiltered(){
@@ -937,7 +915,7 @@ function openDetail(id){
   const med = media(m);
 
   const chipList = (k, arr, clickable)=> arr.length
-    ? `<div class="chips">${arr.map(v=>`<span class="chip ${clickable?'click':''}" ${clickable?`onclick="filterBy('${k}','${esc(v).replace(/'/g,"\\'")}')"`:''}>${esc(v)}</span>`).join('')}</div>`
+    ? `<div class="chips">${arr.map(v=>`<span class="chip ${clickable?'click':''}" ${clickable?`onclick="filterBy('${k}', ${jsArg(v)})"`:''}>${esc(v)}</span>`).join('')}</div>`
     : '<span style="color:var(--muted)">—</span>';
 
   const poster = src
@@ -950,10 +928,7 @@ function openDetail(id){
     <div class="detail">
       <div class="poster-col">
         <div class="poster-wrap" style="aspect-ratio:2/3">${poster}</div>
-        <button class="btn sm" style="width:100%;margin-top:10px" onclick="$('#poster-file').click()">Subir imagen…</button>
-        <input id="poster-file" type="file" accept="image/*" style="display:none"
-               onchange="handlePosterUpload('${m.id}', this.files[0])">
-        ${m.filmaffinity_url?`<a class="btn sm" style="width:100%;margin-top:8px" href="${esc(m.filmaffinity_url)}" target="_blank" rel="noopener">Ver en FilmAffinity ↗</a>`:''}
+        ${m.filmaffinity_url?`<a class="btn sm" style="width:100%;margin-top:10px" href="${esc(m.filmaffinity_url)}" target="_blank" rel="noopener">Ver en FilmAffinity ↗</a>`:''}
       </div>
       <div class="info-col">
         <h2 class="dtitle">${esc(m.titulo)} <span class="dyear">${m.anio||''}</span></h2>
@@ -1133,7 +1108,8 @@ function renderMapa(paisCount){
     return;
   }
 
-  // Limpia instancia previa para poder re-renderizar
+  // Destruye la instancia previa (mapa + tooltip + listeners) antes de recrear
+  if(mapInstance){ try{ mapInstance.destroy(); }catch(e){} mapInstance = null; }
   $('#mapa').innerHTML='';
   const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#00e054';
   try{
@@ -1183,12 +1159,12 @@ function buildSettingsUI(){
   $('#palettes').innerHTML = pals.map(([id,label])=>
     `<span class="palette-opt ${id===settings.palette?'active':''}" onclick="setPalette('${id}')">${label}</span>`).join('');
 }
-function setAccent(c){ settings.accent=c; applyTheme(); saveState(); buildSettingsUI(); if($('#stats').classList.contains('active')) renderStats(); }
-function setPalette(p){ settings.palette=p; applyTheme(); saveState(); buildSettingsUI(); }
+function setAccent(c){ settings.accent=c; applyTheme(); saveSettings(); buildSettingsUI(); if($('#stats').classList.contains('active')) renderStats(); }
+function setPalette(p){ settings.palette=p; applyTheme(); saveSettings(); buildSettingsUI(); }
 function saveNames(){
   settings.p1 = $('#set-p1').value.trim() || 'Persona 1';
   settings.p2 = $('#set-p2').value.trim() || 'Persona 2';
-  saveState(); buildSettingsUI();
+  saveSettings(); buildSettingsUI();
   showBanner('ok','✓ Nombres guardados.',2000);
 }
 
@@ -1221,7 +1197,7 @@ function importJSON(ev){
         try{ await sbInsert(norm); movies.push(norm); ok++; }
         catch(e){ err++; }
       }
-      applyTheme(); saveState(); buildSettingsUI(); refreshFilters(); renderCollection();
+      applyTheme(); saveSettings(); buildSettingsUI(); refreshFilters(); renderCollection();
       showBanner('ok', err
         ? `⚠️ ${ok} importada(s), ${err} con error (puede que ya existan).`
         : `✓ ${ok} película(s) importadas a Supabase.`, 4000);
@@ -1241,7 +1217,7 @@ async function wipeAll(){
       headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' }
     });
     if(!res.ok) throw new Error(await res.text());
-    movies=[]; saveState(); refreshFilters(); renderCollection();
+    movies=[]; saveSettings(); refreshFilters(); renderCollection();
     showBanner('warn','Colección borrada de Supabase.',2500);
   }catch(e){
     showBanner('bad', '❌ Error al borrar: '+e.message);
@@ -1260,7 +1236,7 @@ function switchTab(tab){
   $$('nav.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
   $$('.view').forEach(v=>v.classList.toggle('active', v.id===tab));
   if(tab==='stats') renderStats();
-  if(tab==='ajustes') checkStorage();
+  if(tab==='ajustes') showStorageInfo();
 }
 $$('nav.tabs button').forEach(b=> b.addEventListener('click', ()=>switchTab(b.dataset.tab)) );
 
