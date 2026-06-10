@@ -12,11 +12,10 @@
   · Aplicación 100% autocontenida (HTML + CSS + JS en este mismo archivo).
   · No usa backend, login ni APIs externas para los DATOS de las películas.
   · Persistencia en localStorage del navegador.
-  · ÚNICA dependencia externa opcional: la librería de mapa "jsVectorMap"
-    cargada por CDN, usada SOLO para el mapa mundial de estadísticas. Si no
-    hay internet, el resto de la app funciona y el mapa se sustituye por una
-    lista de países. Las tipografías también se cargan por CDN (Google Fonts)
-    con fuentes del sistema como respaldo.
+  · El mapa mundial de estadísticas usa un SVG local (world-map.svg) que debe
+    estar en el repositorio junto a este archivo; sin dependencias de mapa por
+    CDN. Las tipografías se cargan por CDN (Google Fonts) con fuentes del
+    sistema como respaldo.
   ============================================================================
 -->
 
@@ -25,8 +24,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<!-- Librería de mapa SOLO para estadísticas (CDN, opcional) -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/jsvectormap.min.css">
+<!-- Mapa mundial: world-map.svg local (flekschas/simple-world-map; geometría base de Al MacDonald, dominio público) -->
 
 <style>
 /* ===========================================================================
@@ -274,6 +272,27 @@ textarea{resize:vertical;min-height:80px}
 .kpi.kpi-click:hover{border-color:var(--accent)}
 .kpi-caret{color:var(--muted);font-size:12px;font-weight:700;margin-left:3px}
 .dist-panel{margin-bottom:18px;animation:fade .25s ease}
+/* Calendario de visionados */
+.cal-panel{margin-top:14px;border-top:1px solid var(--line);padding-top:16px;animation:fade .25s ease}
+.cal-head{display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:12px}
+.cal-title{font-family:var(--font-disp);font-weight:700;font-size:16px;min-width:160px;text-align:center;text-transform:capitalize}
+.cal-dows{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;max-width:520px;margin-left:auto;margin-right:auto}
+.cal-dows span{text-align:center;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.3px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;max-width:520px;margin:0 auto}
+.cal-cell{aspect-ratio:1/1;border-radius:8px;display:flex;align-items:center;justify-content:center;position:relative;background:var(--bg-3);color:var(--muted);font-size:13px}
+.cal-cell.empty{background:transparent}
+.cal-cell.has{background:color-mix(in srgb,var(--accent) 20%, var(--bg-3));color:var(--text);cursor:pointer;font-weight:700;border:1px solid color-mix(in srgb,var(--accent) 45%, transparent);transition:background .15s}
+.cal-cell.has:hover{background:color-mix(in srgb,var(--accent) 36%, var(--bg-3))}
+.cal-cell.sel{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.cal-dot{position:absolute;top:3px;right:5px;font-size:9.5px;font-weight:800}
+.cal-day{margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+.cal-day-h{font-weight:700;margin-bottom:10px;font-family:var(--font-disp)}
+.cal-day-list{display:flex;flex-direction:column;gap:8px}
+.cal-film{display:flex;align-items:center;gap:11px;cursor:pointer;padding:6px;border-radius:8px;transition:background .15s}
+.cal-film:hover{background:var(--bg-3)}
+.cal-film-poster{width:36px;height:54px;border-radius:4px;overflow:hidden;background:var(--bg-3);flex:0 0 auto}
+.cal-film-poster img{width:100%;height:100%;object-fit:cover;display:block}
+.cal-film-t{font-size:14px;font-weight:600}
 
 /* Barras horizontales (gráficos sin librería) */
 .bars{display:flex;flex-direction:column;gap:9px}
@@ -292,7 +311,15 @@ textarea{resize:vertical;min-height:80px}
 .legend .li{display:flex;align-items:center;gap:6px}
 .legend .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
 
-#mapa{height:420px;width:100%}
+.mapa-wrap{width:100%;max-width:780px;margin:6px auto 0}
+.mapa-wrap svg{width:100%;height:auto;display:block}
+.mapa-wrap svg path{fill:var(--bg-3);stroke:var(--bg);stroke-width:.5;transition:fill .15s}
+.mapa-wrap svg .seen{cursor:pointer}
+.mapa-wrap svg .seen,
+.mapa-wrap svg .seen path{fill:var(--accent)}
+.mapa-wrap svg .seen:hover,
+.mapa-wrap svg .seen:hover path{fill:color-mix(in srgb,var(--accent) 72%, #ffffff)}
+.h3-count{color:var(--muted);font-weight:600;font-size:13px;margin-left:4px}
 .map-fallback{color:var(--muted);font-size:14px}
 
 /* ===========================================================================
@@ -464,9 +491,6 @@ textarea{resize:vertical;min-height:80px}
   </div>
 </div>
 
-<!-- Librería de mapa SOLO para estadísticas (CDN, opcional) -->
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/jsvectormap.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jsvectormap@1.5.3/dist/maps/world.js"></script>
 
 <script>
 /* ===========================================================================
@@ -996,8 +1020,8 @@ function formatFecha(iso){
 /* ===========================================================================
    F. ESTADÍSTICAS
    =========================================================================== */
-let mapInstance = null;
 let distOpen = false;
+let calOpen = false, calY = null, calM = null, calSelDay = null;
 /* Despliega/colapsa el panel de distribución de notas bajo los KPIs */
 function toggleDist(){
   distOpen = !distOpen;
@@ -1082,19 +1106,24 @@ function renderStats(){
       <div class="stat-card"><h3>Géneros más vistos</h3>${barChart(genCount, 8)}</div>
       <!-- Directores -->
       <div class="stat-card"><h3>Directores más vistos</h3>${barChart(dirCount, 8)}</div>
-      <!-- Ritmo mensual -->
-      <div class="stat-card"><h3>Ritmo de visionado por mes</h3>${barChart(monthCount, 12, true, mesLargo)}</div>
+      <!-- Ritmo mensual + calendario desplegable -->
+      <div class="stat-card wide">
+        <h3 onclick="toggleCal()" style="cursor:pointer">Ritmo de visionado por mes <span id="cal-caret" class="kpi-caret">${calOpen?'▴':'▾'}</span></h3>
+        ${barChart(monthCount, 12, true, mesLargo)}
+        <div id="cal-panel" class="cal-panel" style="display:${calOpen?'block':'none'}"></div>
+      </div>
 
       <!-- Mapa -->
       <div class="stat-card wide">
-        <h3>Países de las películas vistas</h3>
-        <div id="mapa"></div>
+        <h3>Países <span id="paises-count" class="h3-count"></span></h3>
+        <div id="mapa" class="mapa-wrap"></div>
         <div id="map-fallback" class="map-fallback" style="margin-top:10px"></div>
       </div>
     </div>
   `;
 
   renderMapa(paisCount);
+  if(calOpen) drawCalendar();
 }
 
 /* Cuenta frecuencias de un array de arrays (géneros, directores…) */
@@ -1153,54 +1182,146 @@ function histTriple(h1,h2,hA){
   return `<div class="hist">${cols}</div>`;
 }
 
-/* ----- Mapa mundial (jsVectorMap por CDN; con respaldo en texto) ----- */
-function renderMapa(paisCount){
-  const fb = $('#map-fallback');
-  // Pasamos nombres de país (en varios idiomas) a códigos ISO-2 que entiende el mapa
-  const iso = {}; const noMatch=[];
+/* ----- Calendario de visionados ----- */
+/* Índice fecha (YYYY-MM-DD) -> array de películas vistas ese día */
+function viewingsByDate(){
+  const map = {};
+  movies.forEach(m=>{ if(m.fecha_visionado){ (map[m.fecha_visionado] = map[m.fecha_visionado]||[]).push(m); } });
+  return map;
+}
+/* Abre/cierra el calendario; al abrir por primera vez se sitúa en el mes más reciente con visionados */
+function toggleCal(){
+  calOpen = !calOpen;
+  const p = document.getElementById('cal-panel');
+  const c = document.getElementById('cal-caret');
+  if(c) c.textContent = calOpen ? '▴' : '▾';
+  if(!p) return;
+  p.style.display = calOpen ? 'block' : 'none';
+  if(calOpen){
+    if(calY===null){
+      const fechas = movies.map(m=>m.fecha_visionado).filter(Boolean).sort();
+      const ref = fechas.length ? fechas[fechas.length-1] : new Date().toISOString().slice(0,10);
+      calY = Number(ref.slice(0,4)); calM = Number(ref.slice(5,7))-1;
+    }
+    drawCalendar();
+  }
+}
+/* Cambia de mes (delta -1 / +1) */
+function calNav(delta){
+  calM += delta;
+  if(calM<0){ calM=11; calY--; }
+  if(calM>11){ calM=0; calY++; }
+  calSelDay = null;
+  drawCalendar();
+}
+/* Selecciona/deselecciona un día con visionado */
+function calSelectDay(iso){
+  calSelDay = (calSelDay===iso) ? null : iso;
+  drawCalendar();
+}
+/* Dibuja el mes actual del calendario dentro de #cal-panel */
+function drawCalendar(){
+  const panel = document.getElementById('cal-panel');
+  if(!panel || calY===null) return;
+  const byDate = viewingsByDate();
+  const startDow = (new Date(calY, calM, 1).getDay()+6)%7; // lunes = 0
+  const daysInMonth = new Date(calY, calM+1, 0).getDate();
+  const dows = ['L','M','X','J','V','S','D'];
+
+  let cells = '';
+  for(let i=0;i<startDow;i++) cells += `<div class="cal-cell empty"></div>`;
+  for(let d=1; d<=daysInMonth; d++){
+    const iso = `${calY}-${String(calM+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const vs = byDate[iso];
+    const has = vs && vs.length;
+    const sel = calSelDay===iso;
+    cells += `<div class="cal-cell ${has?'has':''} ${sel?'sel':''}" ${has?`onclick="calSelectDay('${iso}')"`:''}>
+      ${d}${has&&vs.length>1?`<span class="cal-dot">${vs.length}</span>`:''}
+    </div>`;
+  }
+
+  let dayPanel = '';
+  if(calSelDay && byDate[calSelDay]){
+    dayPanel = `<div class="cal-day">
+      <div class="cal-day-h">${formatFecha(calSelDay)}</div>
+      <div class="cal-day-list">${byDate[calSelDay].map(m=>`
+        <div class="cal-film" onclick="openDetail('${m.id}')">
+          <div class="cal-film-poster">${posterSrc(m)?`<img src="${esc(posterSrc(m))}" alt="" onerror="this.remove()">`:''}</div>
+          <div class="cal-film-t">${esc(m.titulo)} <span style="color:var(--muted);font-weight:500">${m.anio||''}</span></div>
+        </div>`).join('')}</div>
+    </div>`;
+  }
+
+  panel.innerHTML = `
+    <div class="cal-head">
+      <button class="btn sm" onclick="calNav(-1)">‹</button>
+      <span class="cal-title">${MESES[calM]} ${calY}</span>
+      <button class="btn sm" onclick="calNav(1)">›</button>
+    </div>
+    <div class="cal-dows">${dows.map(x=>`<span>${x}</span>`).join('')}</div>
+    <div class="cal-grid">${cells}</div>
+    ${dayPanel}
+  `;
+}
+
+/* ----- Mapa mundial (SVG local world-map.svg, sin dependencias) ----- */
+let worldSvgCache = null;
+/* Carga el SVG una sola vez por sesión */
+async function loadWorldSvg(){
+  if(worldSvgCache!=null) return worldSvgCache;
+  const res = await fetch('world-map.svg');
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  worldSvgCache = await res.text();
+  return worldSvgCache;
+}
+async function renderMapa(paisCount){
+  const cont = $('#mapa'); const fb = $('#map-fallback');
+  if(!cont) return;
+
+  // Contador de países distintos, fusionado en el título de la tarjeta
+  const nPaises = Object.keys(paisCount).length;
+  const cnt = $('#paises-count');
+  if(cnt) cnt.textContent = nPaises ? `· ${nPaises} distintos` : '';
+
+  // Nombre de país -> ISO-2 en minúsculas (como los id del SVG); guardamos el nombre original para el filtro
+  const isoCount = {}, isoName = {}, noMatch = [];
   Object.entries(paisCount).forEach(([nombre,n])=>{
     const code = paisAISO(nombre);
-    if(code) iso[code] = (iso[code]||0)+n;
+    if(code){ const c = code.toLowerCase(); isoCount[c] = (isoCount[c]||0)+n; isoName[c] = nombre; }
     else noMatch.push(nombre);
   });
 
-  // Si la librería no cargó (sin internet), mostramos lista
-  if(typeof jsVectorMap === 'undefined'){
-    $('#mapa').innerHTML = '';
-    fb.innerHTML = '🌐 El mapa necesita conexión a internet (librería por CDN). Países de tu colección: ' +
+  // Inyecta el SVG (desde caché o fetch local)
+  let svgText;
+  try{ svgText = await loadWorldSvg(); }
+  catch(e){
+    cont.innerHTML = '';
+    fb.innerHTML = '🌐 No se pudo cargar <b>world-map.svg</b> (debe estar en el repo, junto al index.html). ' +
+      'Países de tu colección: ' +
       Object.entries(paisCount).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(k)} (${v})`).join(', ');
     return;
   }
+  cont.innerHTML = svgText;
+  const svg = cont.querySelector('svg');
+  if(!svg) return;
+  svg.removeAttribute('width'); svg.removeAttribute('height'); // que escale al contenedor
 
-  // Destruye la instancia previa (mapa + tooltip + listeners) antes de recrear
-  if(mapInstance){ try{ mapInstance.destroy(); }catch(e){} mapInstance = null; }
-  $('#mapa').innerHTML='';
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#00e054';
-  try{
-    mapInstance = new jsVectorMap({
-      selector:'#mapa', map:'world',
-      backgroundColor:'transparent',
-      zoomButtons:true,
-      regionStyle:{ initial:{ fill:'#2c3440', stroke:'#14181c', strokeWidth:.4 } },
-      // Coloreamos según número de películas por país
-      series:{ regions:[{
-        attribute:'fill',
-        values:iso,
-        scale:['#37414d', accent],
-        normalizeFunction:'polynomial'
-      }]},
-      onRegionTooltipShow(event, tooltip, code){
-        const n = iso[code];
-        if(n) tooltip.text(tooltip.text()+` — ${n} película(s)`);
-      }
-    });
-    // Nota sobre países no reconocidos
-    fb.innerHTML = noMatch.length
-      ? `<span style="color:var(--warn)">Sin ubicar en el mapa: ${noMatch.map(esc).join(', ')}.</span>`
-      : '';
-  }catch(e){
-    fb.innerHTML = 'No se pudo dibujar el mapa: '+e.message;
-  }
+  // Marca y enlaza los países vistos
+  Object.keys(isoCount).forEach(code=>{
+    let el;
+    try{ el = svg.querySelector('#'+CSS.escape(code)); }catch(e){ el = null; }
+    if(!el) return;
+    el.classList.add('seen');
+    const nombre = isoName[code];
+    el.addEventListener('click', ()=> filterBy('pais', nombre));
+    const t = document.createElementNS('http://www.w3.org/2000/svg','title');
+    t.textContent = `${nombre} · ${isoCount[code]} película(s)`;
+    el.appendChild(t);
+  });
+
+  fb.innerHTML = noMatch.length
+    ? `<span style="color:var(--warn)">Sin ubicar en el mapa: ${noMatch.map(esc).join(', ')}.</span>`
+    : '';
 }
 
 /* ===========================================================================
